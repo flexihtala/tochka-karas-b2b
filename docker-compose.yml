@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_tochka_karas_b2b
+    environment:
+      POSTGRES_DB: tochka_karas_b2b
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: tochka_karas_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U tochka_karas_b2b" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
