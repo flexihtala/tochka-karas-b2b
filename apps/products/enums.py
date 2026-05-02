@@ -7,3 +7,5 @@ class ProductStatus(StrEnum):
         return name
 
     CREATED = auto()
+    ON_MODERATION = auto()
+    HARD_BLOCKED = auto()
