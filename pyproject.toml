@@ -47,3 +47,6 @@ inline-quotes = "single"
 [tool.ruff]
 line-length = 120
 target-version = "py314"
+
+[tool.pytest.ini_options]
+addopts = ["-p", "no:debugging"]
