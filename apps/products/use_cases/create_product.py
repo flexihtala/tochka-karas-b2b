@@ -5,11 +5,19 @@ from apps.auth.errors import UnauthorizedError
 from apps.auth.schemas.token import AuthenticatedUserSchema
 from apps.products.enums import ProductStatus
 from apps.products.errors import InvalidProductRequestError
-from apps.products.repositories import CategoryRepository, ProductRepository
-from apps.products.schemas.product import ProductCreateSchema
+from apps.products.repositories import (
+    CategoryRepository,
+    ProductCharacteristicRepository,
+    ProductImageRepository,
+    ProductRepository,
+)
+from apps.products.schemas.product import (
+    ProductCharacteristicCreateSchema,
+    ProductCreateSchema,
+    ProductImageCreateSchema,
+)
 from apps.products.schemas.request import ProductCreateRequestSchema
 from apps.products.schemas.response import (
-    ProductCategoryResponseSchema,
     ProductCharacteristicResponseSchema,
     ProductImageResponseSchema,
     ProductResponseSchema,
@@ -20,9 +28,13 @@ class CreateProductUseCase:
     def __init__(
         self,
         product_repository: ProductRepository,
+        product_image_repository: ProductImageRepository,
+        product_characteristic_repository: ProductCharacteristicRepository,
         category_repository: CategoryRepository,
     ):
         self.product_repository = product_repository
+        self.product_image_repository = product_image_repository
+        self.product_characteristic_repository = product_characteristic_repository
         self.category_repository = category_repository
 
     async def __call__(
@@ -51,25 +63,44 @@ class CreateProductUseCase:
                 description=description,
                 status=ProductStatus.CREATED,
                 category_id=category_id,
-                images=[image.model_dump() for image in data.images],
-                characteristics=[characteristic.model_dump() for characteristic in data.characteristics],
             )
         )
+        images = [
+            await self.product_image_repository.create(
+                ProductImageCreateSchema(
+                    product_id=product.id,
+                    url=image.url,
+                    ordering=image.ordering,
+                )
+            )
+            for image in data.images
+        ]
+        characteristics = [
+            await self.product_characteristic_repository.create(
+                ProductCharacteristicCreateSchema(
+                    product_id=product.id,
+                    name=characteristic.name,
+                    value=characteristic.value,
+                )
+            )
+            for characteristic in data.characteristics
+        ]
 
         return ProductResponseSchema(
             id=product.id,
+            seller_id=product.seller_id,
+            category_id=product.category_id,
             title=product.title,
             description=product.description,
             status=product.status,
-            deleted=product.deleted,
-            blocked=product.blocked,
-            category=ProductCategoryResponseSchema(id=category.id, name=category.name),
+            created_at=product.created_at,
+            updated_at=product.updated_at,
             images=[
                 ProductImageResponseSchema.model_validate(image)
-                for image in sorted(product.images, key=lambda item: item['ordering'])
+                for image in sorted(images, key=lambda item: item.ordering)
             ],
             characteristics=[
-                ProductCharacteristicResponseSchema.model_validate(item) for item in product.characteristics
+                ProductCharacteristicResponseSchema.model_validate(item) for item in characteristics
             ],
             skus=[],
         )

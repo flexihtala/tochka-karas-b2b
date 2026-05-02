@@ -1,9 +1,42 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import ConfigDict
 
 from apps.products.enums import ProductStatus
 from schemas import CreateUUIDSchema, ReadUUIDSchema, UpdateUUIDSchema
+
+
+class ProductImageCreateSchema(CreateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID
+    url: str
+    ordering: int
+
+
+class ProductImageReadSchema(ReadUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID
+    url: str
+    ordering: int
+
+
+class ProductCharacteristicCreateSchema(CreateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID
+    name: str
+    value: str
+
+
+class ProductCharacteristicReadSchema(ReadUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID
+    name: str
+    value: str
 
 
 class ProductCreateSchema(CreateUUIDSchema):
@@ -16,8 +49,6 @@ class ProductCreateSchema(CreateUUIDSchema):
     deleted: bool = False
     blocked: bool = False
     category_id: UUID
-    images: list[dict]
-    characteristics: list[dict] = []
 
 
 class ProductReadSchema(ReadUUIDSchema):
@@ -30,8 +61,8 @@ class ProductReadSchema(ReadUUIDSchema):
     deleted: bool
     blocked: bool
     category_id: UUID
-    images: list[dict]
-    characteristics: list[dict]
+    created_at: datetime
+    updated_at: datetime
 
 
 class ProductUpdateSchema(UpdateUUIDSchema):
@@ -43,5 +74,19 @@ class ProductUpdateSchema(UpdateUUIDSchema):
     deleted: bool | None = None
     blocked: bool | None = None
     category_id: UUID | None = None
-    images: list[dict] | None = None
-    characteristics: list[dict] | None = None
+
+
+class ProductImageUpdateSchema(UpdateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID | None = None
+    url: str | None = None
+    ordering: int | None = None
+
+
+class ProductCharacteristicUpdateSchema(UpdateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: UUID | None = None
+    name: str | None = None
+    value: str | None = None

@@ -11,17 +11,29 @@ from apps.auth.dependencies import get_current_user
 from apps.auth.enums import UserRole
 from apps.auth.schemas.token import AuthenticatedUserSchema
 from apps.errors import setup_error_handlers
-from apps.products.repositories import CategoryRepository, ProductRepository
+from apps.products.repositories import (
+    CategoryRepository,
+    ProductCharacteristicRepository,
+    ProductImageRepository,
+    ProductRepository,
+)
 from apps.products.routers import router as products_router
 from apps.products.schemas.category import CategoryReadSchema
 from apps.products.use_cases import CreateProductUseCase
-from tests.products.fakes import FakeCategoryRepository, FakeProductRepository
+from tests.products.fakes import (
+    FakeCategoryRepository,
+    FakeProductCharacteristicRepository,
+    FakeProductImageRepository,
+    FakeProductRepository,
+)
 
 
 @dataclass
 class ProductRouteFakes:
     categories: FakeCategoryRepository
     products: FakeProductRepository
+    images: FakeProductImageRepository
+    characteristics: FakeProductCharacteristicRepository
 
 
 class ProductRouteProvider(Provider):
@@ -32,6 +44,14 @@ class ProductRouteProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def get_product_repository(self) -> ProductRepository:
         return self.fakes.products
+
+    @provide(scope=Scope.REQUEST)
+    def get_product_image_repository(self) -> ProductImageRepository:
+        return self.fakes.images
+
+    @provide(scope=Scope.REQUEST)
+    def get_product_characteristic_repository(self) -> ProductCharacteristicRepository:
+        return self.fakes.characteristics
 
     @provide(scope=Scope.REQUEST)
     def get_category_repository(self) -> CategoryRepository:
@@ -45,7 +65,12 @@ def route_fakes() -> ProductRouteFakes:
     category = CategoryReadSchema(id=uuid4(), name='iOS')
     categories = FakeCategoryRepository()
     categories.add(category)
-    return ProductRouteFakes(categories=categories, products=FakeProductRepository())
+    return ProductRouteFakes(
+        categories=categories,
+        products=FakeProductRepository(),
+        images=FakeProductImageRepository(),
+        characteristics=FakeProductCharacteristicRepository(),
+    )
 
 
 @pytest.fixture
@@ -85,8 +110,20 @@ def test_create_product_route_returns_201_with_created_status(client: TestClient
     body = response.json()
     assert body['status'] == 'CREATED'
     assert body['skus'] == []
-    assert body['category']['name'] == 'iOS'
-    assert body['images'] == [{'url': '/s3/iphone15-front.jpg', 'ordering': 0}]
+    assert body['seller_id'] == str(client.app.state.seller_id)
+    assert body['category_id'] == first_category_id(route_fakes)
+    assert body['images'][0]['id']
+    assert body['images'][0]['url'] == '/s3/iphone15-front.jpg'
+    assert body['images'][0]['ordering'] == 0
+    assert body['characteristics'][0]['id']
+    assert body['characteristics'][0]['name'] == 'Бренд'
+    assert body['created_at']
+    assert body['updated_at']
+    assert route_fakes.images.created_images[0].product_id == route_fakes.products.created_read_product.id
+    assert (
+        route_fakes.characteristics.created_characteristics[0].product_id
+        == route_fakes.products.created_read_product.id
+    )
 
 
 def test_create_product_route_takes_seller_id_from_jwt(client: TestClient, route_fakes: ProductRouteFakes):
