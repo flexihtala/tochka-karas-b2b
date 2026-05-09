@@ -22,9 +22,9 @@ from apps.skus.repositories import (
     SKURepository,
 )
 from apps.skus.routers import router as skus_router
-from apps.skus.schemas import SKUCharacteristicReadSchema, SKUImageReadSchema, SKUReadSchema
+from apps.skus.schemas import SKUCharacteristicReadSchema, SKUImageReadSchema, SKUReadSchema, SKUUpdateSchema
 from apps.skus.schemas.moderation import ProductModerationEventSchema
-from apps.skus.use_cases import CreateSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, EditSKUUseCase
 
 
 class FakeProductRepository:
@@ -35,13 +35,19 @@ class FakeProductRepository:
         return self.product if self.product.id == id_ else None
 
     async def update(self, data: ProductUpdateSchema) -> ProductReadSchema:
-        self.product = self.product.model_copy(update={'status': data.status})
+        update_values = data.model_dump(exclude_unset=True, exclude={'id'})
+        self.product = self.product.model_copy(update=update_values)
         return self.product
 
 
 class FakeSKURepository:
-    def __init__(self):
+    def __init__(self, existing: list[SKUReadSchema] | None = None):
         self.created_skus: list[SKUReadSchema] = []
+        self.skus: dict[UUID, SKUReadSchema] = {}
+        self.updated_skus: list[SKUUpdateSchema] = []
+        if existing:
+            for sku in existing:
+                self.skus[sku.id] = sku
 
     async def count_by_product_id(self, product_id: UUID) -> int:
         return 0
@@ -61,10 +67,27 @@ class FakeSKURepository:
             updated_at=now,
         )
         self.created_skus.append(sku)
+        self.skus[sku.id] = sku
         return sku
+
+    async def get_or_none(self, id_: UUID) -> SKUReadSchema | None:
+        return self.skus.get(id_)
+
+    async def update(self, data: SKUUpdateSchema) -> SKUReadSchema | None:
+        self.updated_skus.append(data)
+        sku = self.skus.get(data.id)
+        if sku is None:
+            return None
+        update_values = data.model_dump(exclude_unset=True, exclude={'id'})
+        updated = sku.model_copy(update=update_values)
+        self.skus[data.id] = updated
+        return updated
 
 
 class FakeSKUImageRepository:
+    def __init__(self):
+        self.deleted_for: list[UUID] = []
+
     async def create(self, data) -> SKUImageReadSchema:
         return SKUImageReadSchema(
             id=uuid4(),
@@ -73,8 +96,14 @@ class FakeSKUImageRepository:
             ordering=data.ordering,
         )
 
+    async def delete_by_sku_id(self, sku_id: UUID) -> None:
+        self.deleted_for.append(sku_id)
+
 
 class FakeSKUCharacteristicRepository:
+    def __init__(self):
+        self.deleted_for: list[UUID] = []
+
     async def create(self, data) -> SKUCharacteristicReadSchema:
         return SKUCharacteristicReadSchema(
             id=uuid4(),
@@ -82,6 +111,9 @@ class FakeSKUCharacteristicRepository:
             name=data.name,
             value=data.value,
         )
+
+    async def delete_by_sku_id(self, sku_id: UUID) -> None:
+        self.deleted_for.append(sku_id)
 
 
 class FakeModerationRepository:
@@ -127,6 +159,7 @@ class SKURouteProvider(Provider):
         return self.fakes.moderation
 
     create_sku_use_case = provide(CreateSKUUseCase, scope=Scope.REQUEST)
+    edit_sku_use_case = provide(EditSKUUseCase, scope=Scope.REQUEST)
 
 
 @pytest.fixture
@@ -191,3 +224,98 @@ def test_create_sku_route_returns_201(client: TestClient, route_fakes: SKURouteF
     assert body['images'][0]['url'] == '/s3/sku-front.jpg'
     assert route_fakes.products.product.status == ProductStatus.ON_MODERATION
     assert len(route_fakes.moderation.events) == 1
+
+
+def make_sku(product_id: UUID, reserved_quantity: int = 0) -> SKUReadSchema:
+    now = datetime.now(UTC)
+    return SKUReadSchema(
+        id=uuid4(),
+        product_id=product_id,
+        name='256 GB Black',
+        price=100_000,
+        stock_quantity=10,
+        reserved_quantity=reserved_quantity,
+        article='IPH15PM-256-BLK',
+        cost_price=80_000,
+        discount=5,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def edit_payload() -> dict:
+    return {
+        'name': '256 GB Space Black',
+        'price': 120000,
+        'stock_quantity': 15,
+        'article': 'IPH15PM-256-SBLK',
+        'cost_price': 85000,
+        'discount': 10,
+        'images': [{'url': '/s3/sku-fixed.jpg', 'ordering': 0}],
+        'characteristics': [{'name': 'Цвет', 'value': 'Чёрный'}],
+    }
+
+
+def test_edit_sku_route_preserves_reserved_quantity(
+    client: TestClient, route_fakes: SKURouteFakes, product: ProductReadSchema
+):
+    sku = make_sku(product.id, reserved_quantity=4)
+    route_fakes.skus.skus[sku.id] = sku
+    route_fakes.products.product = route_fakes.products.product.model_copy(update={'status': ProductStatus.MODERATED})
+
+    response = client.put(f'/api/v1/skus/{sku.id}', json=edit_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['reserved_quantity'] == 4
+    assert body['name'] == '256 GB Space Black'
+    assert body['price'] == 120000
+    assert route_fakes.products.product.status == ProductStatus.ON_MODERATION
+    assert len(route_fakes.moderation.events) == 1
+    assert route_fakes.moderation.events[0].event == 'EDITED'
+
+
+def test_edit_sku_route_hard_blocked_returns_403(
+    client: TestClient, route_fakes: SKURouteFakes, product: ProductReadSchema
+):
+    sku = make_sku(product.id)
+    route_fakes.skus.skus[sku.id] = sku
+    route_fakes.products.product = route_fakes.products.product.model_copy(
+        update={'status': ProductStatus.HARD_BLOCKED}
+    )
+
+    response = client.put(f'/api/v1/skus/{sku.id}', json=edit_payload())
+
+    assert response.status_code == 403
+    assert response.json() == {'code': 'FORBIDDEN', 'message': 'Cannot edit SKU of hard-blocked product'}
+
+
+def test_edit_sku_route_other_seller_returns_403(
+    client: TestClient, route_fakes: SKURouteFakes, product: ProductReadSchema
+):
+    sku = make_sku(product.id)
+    route_fakes.skus.skus[sku.id] = sku
+    route_fakes.products.product = route_fakes.products.product.model_copy(update={'seller_id': uuid4()})
+
+    response = client.put(f'/api/v1/skus/{sku.id}', json=edit_payload())
+
+    assert response.status_code == 403
+    assert response.json() == {'code': 'NOT_OWNER', 'message': 'SKU does not belong to the authenticated seller'}
+
+
+def test_edit_sku_route_missing_returns_404(client: TestClient, route_fakes: SKURouteFakes):
+    response = client.put(f'/api/v1/skus/{uuid4()}', json=edit_payload())
+
+    assert response.status_code == 404
+    assert response.json() == {'code': 'NOT_FOUND', 'message': 'SKU not found'}
+
+
+def test_edit_sku_route_no_longer_returns_501(
+    client: TestClient, route_fakes: SKURouteFakes, product: ProductReadSchema
+):
+    sku = make_sku(product.id)
+    route_fakes.skus.skus[sku.id] = sku
+
+    response = client.put(f'/api/v1/skus/{sku.id}', json=edit_payload())
+
+    assert response.status_code != 501

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -11,6 +12,7 @@ from apps.auth.dependencies import get_current_user
 from apps.auth.enums import UserRole
 from apps.auth.schemas.token import AuthenticatedUserSchema
 from apps.errors import setup_error_handlers
+from apps.products.enums import ProductStatus
 from apps.products.repositories import (
     CategoryRepository,
     ProductCharacteristicRepository,
@@ -19,7 +21,10 @@ from apps.products.repositories import (
 )
 from apps.products.routers import router as products_router
 from apps.products.schemas.category import CategoryReadSchema
-from apps.products.use_cases import CreateProductUseCase
+from apps.products.schemas.product import ProductReadSchema
+from apps.products.use_cases import CreateProductUseCase, EditProductUseCase
+from apps.skus.repositories import ModerationRepository
+from apps.skus.schemas.moderation import ProductModerationEventSchema
 from tests.products.fakes import (
     FakeCategoryRepository,
     FakeProductCharacteristicRepository,
@@ -28,12 +33,21 @@ from tests.products.fakes import (
 )
 
 
+class FakeModerationRepository:
+    def __init__(self):
+        self.events: list[ProductModerationEventSchema] = []
+
+    async def send_product_event(self, event: ProductModerationEventSchema) -> None:
+        self.events.append(event)
+
+
 @dataclass
 class ProductRouteFakes:
     categories: FakeCategoryRepository
     products: FakeProductRepository
     images: FakeProductImageRepository
     characteristics: FakeProductCharacteristicRepository
+    moderation: FakeModerationRepository
 
 
 class ProductRouteProvider(Provider):
@@ -57,7 +71,12 @@ class ProductRouteProvider(Provider):
     def get_category_repository(self) -> CategoryRepository:
         return self.fakes.categories
 
+    @provide(scope=Scope.REQUEST)
+    def get_moderation_repository(self) -> ModerationRepository:
+        return self.fakes.moderation
+
     create_product_use_case = provide(CreateProductUseCase, scope=Scope.REQUEST)
+    edit_product_use_case = provide(EditProductUseCase, scope=Scope.REQUEST)
 
 
 @pytest.fixture
@@ -70,6 +89,7 @@ def route_fakes() -> ProductRouteFakes:
         products=FakeProductRepository(),
         images=FakeProductImageRepository(),
         characteristics=FakeProductCharacteristicRepository(),
+        moderation=FakeModerationRepository(),
     )
 
 
@@ -162,3 +182,122 @@ def test_create_product_route_invalid_category_id_returns_400(client: TestClient
 
     assert response.status_code == 400
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Category not found'}
+
+
+def make_existing_product(seller_id, category_id, status: ProductStatus) -> ProductReadSchema:
+    now = datetime.now(UTC)
+    return ProductReadSchema(
+        id=uuid4(),
+        seller_id=seller_id,
+        title='iPhone 15 Pro Max',
+        description='Флагманский смартфон Apple',
+        status=status,
+        deleted=False,
+        blocked=False,
+        category_id=category_id,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def edit_payload(category_id: str) -> dict:
+    return {
+        'title': 'iPhone 15 Pro Max — обновлено',
+        'description': 'Описание после правок',
+        'category_id': category_id,
+        'images': [{'url': '/s3/iphone15-fixed.jpg', 'ordering': 0}],
+        'characteristics': [{'name': 'Бренд', 'value': 'Apple'}],
+    }
+
+
+def test_edit_product_route_returns_200_and_on_moderation(client: TestClient, route_fakes: ProductRouteFakes):
+    category_id = first_category_id(route_fakes)
+    product = make_existing_product(
+        client.app.state.seller_id,
+        route_fakes.categories.categories[next(iter(route_fakes.categories.categories))].id,
+        ProductStatus.MODERATED,
+    )
+    route_fakes.products.add(product)
+
+    response = client.put(f'/api/v1/products/{product.id}', json=edit_payload(category_id))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['status'] == 'ON_MODERATION'
+    assert body['title'] == 'iPhone 15 Pro Max — обновлено'
+    assert body['images'][0]['url'] == '/s3/iphone15-fixed.jpg'
+    assert len(route_fakes.moderation.events) == 1
+    assert route_fakes.moderation.events[0].event == 'EDITED'
+
+
+def test_edit_product_route_blocked_status_returns_to_on_moderation(client: TestClient, route_fakes: ProductRouteFakes):
+    category_id = first_category_id(route_fakes)
+    product = make_existing_product(
+        client.app.state.seller_id,
+        route_fakes.categories.categories[next(iter(route_fakes.categories.categories))].id,
+        ProductStatus.BLOCKED,
+    )
+    route_fakes.products.add(product)
+
+    response = client.put(f'/api/v1/products/{product.id}', json=edit_payload(category_id))
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'ON_MODERATION'
+    assert len(route_fakes.moderation.events) == 1
+
+
+def test_edit_product_route_hard_blocked_returns_403(client: TestClient, route_fakes: ProductRouteFakes):
+    category_id = first_category_id(route_fakes)
+    product = make_existing_product(
+        client.app.state.seller_id,
+        route_fakes.categories.categories[next(iter(route_fakes.categories.categories))].id,
+        ProductStatus.HARD_BLOCKED,
+    )
+    route_fakes.products.add(product)
+
+    response = client.put(f'/api/v1/products/{product.id}', json=edit_payload(category_id))
+
+    assert response.status_code == 403
+    assert response.json() == {'code': 'FORBIDDEN', 'message': 'Cannot edit hard-blocked product'}
+    assert route_fakes.moderation.events == []
+
+
+def test_edit_product_route_other_seller_returns_403(client: TestClient, route_fakes: ProductRouteFakes):
+    category_id = first_category_id(route_fakes)
+    product = make_existing_product(
+        uuid4(),
+        route_fakes.categories.categories[next(iter(route_fakes.categories.categories))].id,
+        ProductStatus.MODERATED,
+    )
+    route_fakes.products.add(product)
+
+    response = client.put(f'/api/v1/products/{product.id}', json=edit_payload(category_id))
+
+    assert response.status_code == 403
+    assert response.json() == {'code': 'NOT_OWNER', 'message': 'Product does not belong to the authenticated seller'}
+    assert route_fakes.moderation.events == []
+
+
+def test_edit_product_route_missing_returns_404(client: TestClient, route_fakes: ProductRouteFakes):
+    response = client.put(f'/api/v1/products/{uuid4()}', json=edit_payload(first_category_id(route_fakes)))
+
+    assert response.status_code == 404
+    assert response.json() == {'code': 'NOT_FOUND', 'message': 'Product not found'}
+
+
+def test_edit_product_route_missing_images_returns_400(client: TestClient, route_fakes: ProductRouteFakes):
+    category_id = first_category_id(route_fakes)
+    product = make_existing_product(
+        client.app.state.seller_id,
+        route_fakes.categories.categories[next(iter(route_fakes.categories.categories))].id,
+        ProductStatus.MODERATED,
+    )
+    route_fakes.products.add(product)
+
+    payload = edit_payload(category_id)
+    payload['images'] = []
+
+    response = client.put(f'/api/v1/products/{product.id}', json=payload)
+
+    assert response.status_code == 400
+    assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'At least one image is required'}
