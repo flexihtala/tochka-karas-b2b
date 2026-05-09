@@ -12,6 +12,7 @@ from .product import ProductReadSchema as ProductReadSchema
 from .product import ProductUpdateSchema as ProductUpdateSchema
 from .request import ProductCharacteristicRequestSchema as ProductCharacteristicRequestSchema
 from .request import ProductCreateRequestSchema as ProductCreateRequestSchema
+from .request import ProductEditRequestSchema as ProductEditRequestSchema
 from .request import ProductImageRequestSchema as ProductImageRequestSchema
 from .response import ProductCharacteristicResponseSchema as ProductCharacteristicResponseSchema
 from .response import ProductImageResponseSchema as ProductImageResponseSchema
