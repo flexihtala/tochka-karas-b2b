@@ -76,6 +76,17 @@ class SKUCreateRequestSchema(BaseModel):
     characteristics: list[SKUCharacteristicSchema] = Field(default_factory=list)
 
 
+class SKUEditRequestSchema(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    price: int = Field(ge=0)
+    stock_quantity: int = Field(ge=0)
+    article: str = Field(min_length=1, max_length=255)
+    cost_price: int | None = Field(default=None, ge=0)
+    discount: int | None = Field(default=None, ge=0)
+    images: list[SKUImageSchema] = Field(default_factory=list)
+    characteristics: list[SKUCharacteristicSchema] = Field(default_factory=list)
+
+
 class SKUCreateSchema(CreateUUIDSchema):
     model_config = ConfigDict(from_attributes=True)
 
@@ -83,6 +94,7 @@ class SKUCreateSchema(CreateUUIDSchema):
     name: str
     price: int
     stock_quantity: int
+    reserved_quantity: int = 0
     article: str
     cost_price: int | None = None
     discount: int | None = None
@@ -95,6 +107,7 @@ class SKUReadSchema(ReadUUIDSchema):
     name: str
     price: int
     stock_quantity: int
+    reserved_quantity: int = 0
     article: str
     cost_price: int | None
     discount: int | None
@@ -109,6 +122,7 @@ class SKUUpdateSchema(UpdateUUIDSchema):
     name: str | None = None
     price: int | None = None
     stock_quantity: int | None = None
+    reserved_quantity: int | None = None
     article: str | None = None
     cost_price: int | None = None
     discount: int | None = None
@@ -138,6 +152,7 @@ class SKUResponseSchema(BaseModel):
     name: str
     price: int
     stock_quantity: int
+    reserved_quantity: int = 0
     article: str
     cost_price: int | None = None
     discount: int | None = None

@@ -18,6 +18,7 @@ class SKU(IDMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)
     stock_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
     article: Mapped[str] = mapped_column(String(255), nullable=False)
     cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount: Mapped[int | None] = mapped_column(Integer, nullable=True)

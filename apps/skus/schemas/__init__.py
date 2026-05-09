@@ -5,6 +5,7 @@ from .sku import SKUCharacteristicResponseSchema as SKUCharacteristicResponseSch
 from .sku import SKUCharacteristicUpdateSchema as SKUCharacteristicUpdateSchema
 from .sku import SKUCreateRequestSchema as SKUCreateRequestSchema
 from .sku import SKUCreateSchema as SKUCreateSchema
+from .sku import SKUEditRequestSchema as SKUEditRequestSchema
 from .sku import SKUImageCreateSchema as SKUImageCreateSchema
 from .sku import SKUImageReadSchema as SKUImageReadSchema
 from .sku import SKUImageResponseSchema as SKUImageResponseSchema

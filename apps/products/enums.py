@@ -8,4 +8,6 @@ class ProductStatus(StrEnum):
 
     CREATED = auto()
     ON_MODERATION = auto()
+    MODERATED = auto()
+    BLOCKED = auto()
     HARD_BLOCKED = auto()

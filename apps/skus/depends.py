@@ -6,7 +6,7 @@ from apps.skus.repositories import (
     SKUImageRepository,
     SKURepository,
 )
-from apps.skus.use_cases import CreateSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, EditSKUUseCase
 
 
 class SkusProvider(Provider):
@@ -16,6 +16,7 @@ class SkusProvider(Provider):
     moderation_repository = provide(ModerationRepository, scope=Scope.REQUEST)
 
     create_sku_use_case = provide(CreateSKUUseCase, scope=Scope.REQUEST)
+    edit_sku_use_case = provide(EditSKUUseCase, scope=Scope.REQUEST)
 
 
 provider = SkusProvider()
