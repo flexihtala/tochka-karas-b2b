@@ -1,0 +1,4 @@
+from .category_repository import CategoryRepository as CategoryRepository
+from .product_characteristic_repository import ProductCharacteristicRepository as ProductCharacteristicRepository
+from .product_image_repository import ProductImageRepository as ProductImageRepository
+from .product_repository import ProductRepository as ProductRepository

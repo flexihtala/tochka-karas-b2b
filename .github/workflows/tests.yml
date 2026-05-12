@@ -1,0 +1,52 @@
+name: checks
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+
+      - name: download_uv
+        run: |
+          pip install uv
+          uv sync --all-extras
+
+      - name: lint
+        run: |
+          uv run ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+
+      - name: download_uv
+        run: |
+          pip install uv
+          uv sync --all-extras
+
+      - name: tests
+        run: |
+          uv run pytest \
+          --cov=. \
+          --no-cov-on-fail \
+          --junitxml=report.xml \
+          --cov-report html:htmlcov \
+          --cov-report xml:coverage.xml \
+          --cov-report term .

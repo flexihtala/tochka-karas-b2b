@@ -167,7 +167,7 @@ def test_register_validation_error_has_project_error_format(client: TestClient):
     response = client.post('/api/v1/auth/register', json={})
 
     assert response.status_code == 400
-    assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Невалидное тело запроса'}
+    assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'email is required'}
 
 
 def test_login_returns_tokens(client: TestClient, stubs: AuthRouteStubs):
