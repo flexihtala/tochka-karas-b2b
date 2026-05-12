@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from alembic import context
 from apps.auth import models as auth_models
 from apps.products import models as product_models
+from apps.skus import models as sku_models
 from db import Base
 from settings import settings
 
@@ -20,6 +21,7 @@ if config.config_file_name is not None:
 
 auth_models
 product_models
+sku_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

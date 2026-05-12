@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     jwt_public_key: str | None = Field(default=None, alias='JWT_PUBLIC_KEY')
     access_token_ttl_seconds: int = Field(default=3600, alias='ACCESS_TOKEN_TTL_SECONDS')
     refresh_token_ttl_seconds: int = Field(default=2_592_000, alias='REFRESH_TOKEN_TTL_SECONDS')
+    moderation_url: str = Field(default='http://localhost:8001', alias='MODERATION_URL')
+    b2b_to_mod_key: str = Field(
+        default='',
+        alias='B2B_TO_MOD_KEY',
+    )
 
     @property
     def sync_database_url(self) -> str:

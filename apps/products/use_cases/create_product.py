@@ -99,9 +99,7 @@ class CreateProductUseCase:
                 ProductImageResponseSchema.model_validate(image)
                 for image in sorted(images, key=lambda item: item.ordering)
             ],
-            characteristics=[
-                ProductCharacteristicResponseSchema.model_validate(item) for item in characteristics
-            ],
+            characteristics=[ProductCharacteristicResponseSchema.model_validate(item) for item in characteristics],
             skus=[],
         )
 
