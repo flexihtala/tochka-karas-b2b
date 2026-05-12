@@ -157,8 +157,27 @@ def test_create_product_route_missing_category_returns_400(client: TestClient, r
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'category_id is required'}
 
 
+def test_create_product_route_missing_title_returns_400(client: TestClient, route_fakes: ProductRouteFakes):
+    payload = product_payload(first_category_id(route_fakes))
+    payload.pop('title')
+
+    response = client.post('/api/v1/products', json=payload)
+
+    assert response.status_code == 400
+    assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'title is required'}
+
+
 def test_create_product_route_invalid_category_id_returns_400(client: TestClient, route_fakes: ProductRouteFakes):
     response = client.post('/api/v1/products', json=product_payload(str(uuid4())))
 
     assert response.status_code == 400
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Category not found'}
+
+
+def test_product_create_openapi_marks_title_and_category_required(client: TestClient):
+    response = client.get('/openapi.json')
+
+    assert response.status_code == 200
+    required = response.json()['components']['schemas']['ProductCreateRequestSchema']['required']
+    assert 'title' in required
+    assert 'category_id' in required
