@@ -13,14 +13,16 @@ from apps.auth.schemas import ErrorResponseSchema
 from apps.catalog.schemas import (
     CatalogFacetsResponseSchema,
     CatalogPaginatedResponseSchema,
+    CatalogProductDetailResponseSchema,
 )
-from apps.catalog.use_cases import GetFacetsUseCase, ListProductsUseCase
+from apps.catalog.use_cases import GetFacetsUseCase, GetProductUseCase, ListProductsUseCase
 
 router = APIRouter()
 
 
 error_responses = {
     400: {'model': ErrorResponseSchema},
+    404: {'model': ErrorResponseSchema},
     502: {'model': ErrorResponseSchema},
 }
 
@@ -69,3 +71,16 @@ async def get_facets(
         price_min=price_min,
         price_max=price_max,
     )
+
+
+@router.get(
+    '/products/{product_id}',
+    response_model=CatalogProductDetailResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def get_product(
+    product_id: UUID,
+    use_case: FromDishka[GetProductUseCase],
+) -> CatalogProductDetailResponseSchema:
+    return await use_case(product_id)

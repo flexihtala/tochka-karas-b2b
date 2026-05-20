@@ -4,6 +4,10 @@ from .response import (
     CatalogFacetValueSchema,
     CatalogPaginatedResponseSchema,
     CatalogProductCardSchema,
+    CatalogProductDetailCharacteristicSchema,
+    CatalogProductDetailImageSchema,
+    CatalogProductDetailResponseSchema,
+    CatalogProductDetailSkuSchema,
 )
 
 __all__ = [
@@ -12,4 +16,8 @@ __all__ = [
     'CatalogFacetsResponseSchema',
     'CatalogPaginatedResponseSchema',
     'CatalogProductCardSchema',
+    'CatalogProductDetailCharacteristicSchema',
+    'CatalogProductDetailImageSchema',
+    'CatalogProductDetailResponseSchema',
+    'CatalogProductDetailSkuSchema',
 ]

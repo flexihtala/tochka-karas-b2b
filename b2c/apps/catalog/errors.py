@@ -22,6 +22,13 @@ class InvalidSearchError(CatalogError):
         super().__init__('INVALID_REQUEST', message, 400)
 
 
+class ProductNotFoundError(CatalogError):
+    """Товар не найден / заблокирован / удалён."""
+
+    def __init__(self, message: str = 'Product not found'):
+        super().__init__('NOT_FOUND', message, 404)
+
+
 class CatalogUnavailableError(CatalogError):
     """B2B недоступен — отвечаем 502 Bad Gateway."""
 
