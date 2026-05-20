@@ -16,7 +16,11 @@ dependencies = [
     "pyjwt[crypto]>=2.10",
     "greenlet>=3.2",
     "httpx>=0.28",
+    "shared",
 ]
+
+[tool.uv.sources]
+shared = { workspace = true }
 
 [dependency-groups]
 dev = [
