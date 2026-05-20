@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
     database_url: str = Field(
-        default='postgresql+asyncpg://postgres:tochka_karas_password@localhost:5432/tochka_karas_b2b',
+        default='postgresql+asyncpg://postgres:postgres@localhost:5433/b2b',
         alias='DATABASE_URL',
     )
     jwt_algorithm: str = Field(default='HS256', alias='JWT_ALGORITHM')
