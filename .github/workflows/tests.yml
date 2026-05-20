@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  lint-b2b:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./b2b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: install_uv
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: lint
+        run: uv run ruff check .
+
+  test-b2b:
+    runs-on: ubuntu-latest
+    needs: lint-b2b
+    defaults:
+      run:
+        working-directory: ./b2b
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: install_uv
+        run: |
+          pip install uv
+          uv sync --all-extras
+      - name: tests
+        run: |
+          uv run pytest \
+            --cov=. \
+            --no-cov-on-fail \
+            --junitxml=report.xml \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term .

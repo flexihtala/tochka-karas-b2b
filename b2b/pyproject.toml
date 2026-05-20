@@ -1,7 +1,7 @@
 [project]
-name = "tochka-karas-b2b"
+name = "b2b"
 version = "0.1.0"
-description = "Backend course project"
+description = "NeoMarket B2B service — seller cabinet (tochka-karas-b2b monorepo)"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115",
@@ -15,6 +15,7 @@ dependencies = [
     "bcrypt>=4.2",
     "pyjwt[crypto]>=2.10",
     "greenlet>=3.2",
+    "httpx>=0.28",
 ]
 
 [dependency-groups]
