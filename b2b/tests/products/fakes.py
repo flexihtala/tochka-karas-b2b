@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from apps.categories.schemas import CategoryCreateSchema, CategoryReadSchema, CategoryUpdateSchema
+from apps.products.enums import ProductStatus
 from apps.products.schemas.db import (
     CharacteristicValueCreateSchema,
     CharacteristicValueReadSchema,
@@ -57,6 +58,39 @@ class FakeProductRepository:
         self.by_id: dict[UUID, ProductReadSchema] = {}
         self.created: list[ProductCreateSchema] = []
 
+    def add(
+        self,
+        *,
+        id: UUID | None = None,
+        seller_id: UUID | None = None,
+        category_id: UUID | None = None,
+        title: str = 'Test product',
+        slug: str = 'test-product',
+        description: str = 'desc',
+        status: ProductStatus = ProductStatus.MODERATED,
+        deleted: bool = False,
+        blocking_reason_id: UUID | None = None,
+        moderator_comment: str | None = None,
+    ) -> ProductReadSchema:
+        product_id = id or uuid4()
+        now = datetime.now(UTC)
+        product = ProductReadSchema(
+            id=product_id,
+            seller_id=seller_id or uuid4(),
+            category_id=category_id or uuid4(),
+            title=title,
+            slug=slug,
+            description=description,
+            status=status,
+            deleted=deleted,
+            blocking_reason_id=blocking_reason_id,
+            moderator_comment=moderator_comment,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[product_id] = product
+        return product
+
     async def create(self, data: ProductCreateSchema) -> ProductReadSchema:
         self.created.append(data)
         product_id = data.id or uuid4()
@@ -87,6 +121,27 @@ class FakeProductImageRepository:
         self.created: list[ProductImageCreateSchema] = []
         self.by_id: dict[UUID, ProductImageReadSchema] = {}
 
+    def add(
+        self,
+        *,
+        product_id: UUID,
+        url: str = '/s3/image.jpg',
+        ordering: int = 0,
+        id: UUID | None = None,
+    ) -> ProductImageReadSchema:
+        image_id = id or uuid4()
+        now = datetime.now(UTC)
+        image = ProductImageReadSchema(
+            id=image_id,
+            product_id=product_id,
+            url=url,
+            ordering=ordering,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[image_id] = image
+        return image
+
     async def create(self, data: ProductImageCreateSchema) -> ProductImageReadSchema:
         self.created.append(data)
         image_id = data.id or uuid4()
@@ -113,6 +168,27 @@ class FakeCharacteristicValueRepository:
     def __init__(self):
         self.created: list[CharacteristicValueCreateSchema] = []
         self.by_id: dict[UUID, CharacteristicValueReadSchema] = {}
+
+    def add(
+        self,
+        *,
+        product_id: UUID,
+        name: str = 'Бренд',
+        value: str = 'Apple',
+        id: UUID | None = None,
+    ) -> CharacteristicValueReadSchema:
+        characteristic_id = id or uuid4()
+        now = datetime.now(UTC)
+        characteristic = CharacteristicValueReadSchema(
+            id=characteristic_id,
+            product_id=product_id,
+            name=name,
+            value=value,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[characteristic_id] = characteristic
+        return characteristic
 
     async def create(self, data: CharacteristicValueCreateSchema) -> CharacteristicValueReadSchema:
         self.created.append(data)
