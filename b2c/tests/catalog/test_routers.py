@@ -8,7 +8,7 @@ from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps.catalog.errors import CatalogUnavailableError, InvalidSortError
+from apps.catalog.errors import CatalogUnavailableError, InvalidSearchError, InvalidSortError
 from apps.catalog.routers import router as catalog_router
 from apps.catalog.schemas.response import (
     CatalogFacetSchema,
@@ -186,3 +186,26 @@ def test_list_products_invalid_price_returns_400(stubs):
     response = client.get('/api/v1/products?price_min=-1')
 
     assert response.status_code == 400
+
+
+def test_list_products_short_search_returns_400(stubs):
+    list_stub, facets_stub = stubs
+    list_stub.error = InvalidSearchError(message='Search query must be at least 3 characters')
+    client = TestClient(_make_app(*stubs))
+
+    response = client.get('/api/v1/products?search=ab')
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body['code'] == 'INVALID_REQUEST'
+    assert '3 characters' in body['message']
+
+
+def test_list_products_with_search_passes_value_to_use_case(stubs):
+    list_stub, facets_stub = stubs
+    client = TestClient(_make_app(*stubs))
+
+    response = client.get('/api/v1/products?search=наушники')
+
+    assert response.status_code == 200
+    assert list_stub.calls[0]['search'] == 'наушники'
