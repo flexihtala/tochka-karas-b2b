@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = Field(default=3600, alias='ACCESS_TOKEN_TTL_SECONDS')
     refresh_token_ttl_seconds: int = Field(default=2_592_000, alias='REFRESH_TOKEN_TTL_SECONDS')
 
+    mod_to_b2b_key: str = Field(default='dev-mod-to-b2b-key', alias='MOD_TO_B2B_KEY')
+    b2b_to_b2c_key: str = Field(default='dev-b2b-to-b2c-key', alias='B2B_TO_B2C_KEY')
+
     @property
     def sync_database_url(self) -> str:
         return self.database_url.replace('+asyncpg', '+psycopg2')

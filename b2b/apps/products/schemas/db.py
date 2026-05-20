@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import ConfigDict
@@ -19,6 +20,7 @@ class ProductCreateSchema(CreateUUIDSchema):
     deleted: bool = False
     blocking_reason_id: UUID | None = None
     moderator_comment: str | None = None
+    field_reports: list[dict[str, Any]] | None = None
 
 
 class ProductReadSchema(ReadUUIDSchema):
@@ -33,6 +35,7 @@ class ProductReadSchema(ReadUUIDSchema):
     deleted: bool
     blocking_reason_id: UUID | None
     moderator_comment: str | None
+    field_reports: list[dict[str, Any]] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -49,6 +52,7 @@ class ProductUpdateSchema(UpdateUUIDSchema):
     deleted: bool | None = None
     blocking_reason_id: UUID | None = None
     moderator_comment: str | None = None
+    field_reports: list[dict[str, Any]] | None = None
 
 
 class ProductImageCreateSchema(CreateUUIDSchema):
