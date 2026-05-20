@@ -40,3 +40,13 @@ class SKUNotFoundError(SKUError):
 class ProductNotFoundError(SKUError):
     def __init__(self, message: str = 'Product not found'):
         super().__init__('NOT_FOUND', message, 404)
+
+
+class SKUConflictError(SKUError):
+    def __init__(self, code: str = 'CONFLICT', message: str = 'Conflict'):
+        super().__init__(code, message, 409)
+
+
+class SKUHasActiveReservesError(SKUConflictError):
+    def __init__(self, message: str = 'Cannot delete SKU with active reserves'):
+        super().__init__('HAS_ACTIVE_RESERVES', message)

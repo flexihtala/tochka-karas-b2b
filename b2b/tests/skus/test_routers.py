@@ -11,7 +11,9 @@ from apps.errors import setup_error_handlers
 from apps.skus.errors import (
     ProductNotFoundError,
     SKUHardBlockedError,
+    SKUHasActiveReservesError,
     SKUImagesRequiredError,
+    SKUNotFoundError,
     SKUNotOwnerError,
 )
 from apps.skus.routers import router as skus_router
@@ -21,7 +23,7 @@ from apps.skus.schemas.response import (
     SKUImageResponseSchema,
     SKUResponseSchema,
 )
-from apps.skus.use_cases import CreateSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
@@ -62,17 +64,42 @@ class StubCreateSKUUseCase:
         return self.response
 
 
+class StubDeleteSKUUseCase:
+    def __init__(self):
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.error: Exception | None = None
+
+    async def __call__(self, sku_id: UUID, current_user: AuthenticatedUserSchema) -> None:
+        self.calls.append((sku_id, current_user))
+        if self.error:
+            raise self.error
+        return None
+
+
 class SKUsRouteProvider(Provider):
-    def __init__(self, stub: StubCreateSKUUseCase):
+    def __init__(
+        self,
+        create_stub: StubCreateSKUUseCase | None = None,
+        delete_stub: StubDeleteSKUUseCase | None = None,
+    ):
         super().__init__()
-        self.stub = stub
+        self.create_stub = create_stub or StubCreateSKUUseCase()
+        self.delete_stub = delete_stub or StubDeleteSKUUseCase()
 
     @provide(scope=Scope.REQUEST)
     def get_create_sku_use_case(self) -> CreateSKUUseCase:
-        return self.stub
+        return self.create_stub
+
+    @provide(scope=Scope.REQUEST)
+    def get_delete_sku_use_case(self) -> DeleteSKUUseCase:
+        return self.delete_stub
 
 
-def _make_app(stub: StubCreateSKUUseCase, user: AuthenticatedUserSchema | None) -> FastAPI:
+def _make_app(
+    stub: StubCreateSKUUseCase | None,
+    user: AuthenticatedUserSchema | None,
+    delete_stub: StubDeleteSKUUseCase | None = None,
+) -> FastAPI:
     from starlette.middleware.base import BaseHTTPMiddleware
 
     class _UserInjector(BaseHTTPMiddleware):
@@ -84,7 +111,10 @@ def _make_app(stub: StubCreateSKUUseCase, user: AuthenticatedUserSchema | None) 
     app.add_middleware(_UserInjector)
     app.include_router(skus_router, prefix='/api/v1')
     setup_error_handlers(app)
-    container = make_async_container(FastapiProvider(), SKUsRouteProvider(stub))
+    container = make_async_container(
+        FastapiProvider(),
+        SKUsRouteProvider(create_stub=stub, delete_stub=delete_stub),
+    )
     setup_dishka(container, app)
     return app
 
@@ -214,3 +244,104 @@ def test_create_sku_missing_images_returns_400(stub: StubCreateSKUUseCase):
     body = response.json()
     assert body['code'] == 'INVALID_REQUEST'
     assert body['message'] == 'Требуется минимум одно изображение'
+
+
+# --- DELETE /api/v1/skus/{sku_id} ---
+
+
+@pytest.fixture
+def delete_stub() -> StubDeleteSKUUseCase:
+    return StubDeleteSKUUseCase()
+
+
+def test_delete_sku_endpoint_returns_204(delete_stub: StubDeleteSKUUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    sku_id = uuid4()
+
+    response = client.delete(f'/api/v1/skus/{sku_id}')
+
+    assert response.status_code == 204
+    assert response.content == b''
+    assert len(delete_stub.calls) == 1
+    called_sku_id, called_user = delete_stub.calls[0]
+    assert called_sku_id == sku_id
+    assert called_user.id == user.id
+
+
+def test_delete_sku_unauthorized_returns_401(delete_stub: StubDeleteSKUUseCase):
+    client = TestClient(_make_app(stub=None, user=None, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 401
+    assert response.json() == {'code': 'UNAUTHORIZED', 'message': 'Unauthorized'}
+    assert delete_stub.calls == []
+
+
+def test_delete_sku_non_seller_returns_403(delete_stub: StubDeleteSKUUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 403
+    assert response.json()['code'] == 'FORBIDDEN'
+    assert delete_stub.calls == []
+
+
+def test_delete_sku_not_found_returns_404(delete_stub: StubDeleteSKUUseCase):
+    delete_stub.error = SKUNotFoundError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 404
+    assert response.json()['code'] == 'NOT_FOUND'
+
+
+def test_delete_sku_not_owner_returns_403(delete_stub: StubDeleteSKUUseCase):
+    delete_stub.error = SKUNotOwnerError(message='SKU does not belong to the authenticated seller')
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 403
+    assert response.json()['code'] == 'NOT_OWNER'
+
+
+def test_delete_sku_hard_blocked_returns_403(delete_stub: StubDeleteSKUUseCase):
+    delete_stub.error = SKUHardBlockedError(message='Cannot delete SKU of hard-blocked product')
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 403
+    assert response.json()['code'] == 'HARD_BLOCKED'
+
+
+def test_delete_sku_active_reserves_returns_409(delete_stub: StubDeleteSKUUseCase):
+    delete_stub.error = SKUHasActiveReservesError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/skus/{uuid4()}')
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body['code'] == 'HAS_ACTIVE_RESERVES'
+    assert body['message'] == 'Cannot delete SKU with active reserves'
+
+
+def test_delete_sku_invalid_uuid_returns_400(delete_stub: StubDeleteSKUUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+
+    response = client.delete('/api/v1/skus/not-a-uuid')
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'INVALID_REQUEST'
+    assert delete_stub.calls == []

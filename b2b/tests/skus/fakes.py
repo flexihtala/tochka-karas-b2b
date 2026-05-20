@@ -26,7 +26,39 @@ class FakeSKURepository:
         self.by_id: dict[UUID, SKUReadSchema] = {}
         self.created: list[SKUCreateSchema] = []
         self.updated: list[SKUUpdateSchema] = []
+        self.deleted_ids: list[UUID] = []
         self.count_by_product_overrides: dict[UUID, int] = {}
+
+    def add(
+        self,
+        *,
+        id: UUID | None = None,
+        product_id: UUID | None = None,
+        name: str = '256GB Black',
+        price: int = 12_999_000,
+        cost_price: int = 9_500_000,
+        discount: int = 0,
+        article: str | None = None,
+        active_quantity: int = 0,
+        reserved_quantity: int = 0,
+    ) -> UUID:
+        sku_id = id or uuid4()
+        now = datetime.now(UTC)
+        sku = SKUReadSchema(
+            id=sku_id,
+            product_id=product_id or uuid4(),
+            name=name,
+            price=price,
+            cost_price=cost_price,
+            discount=discount,
+            article=article,
+            active_quantity=active_quantity,
+            reserved_quantity=reserved_quantity,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[sku_id] = sku
+        return sku_id
 
     async def create(self, data: SKUCreateSchema) -> SKUReadSchema:
         self.created.append(data)
@@ -50,6 +82,10 @@ class FakeSKURepository:
 
     async def get_or_none(self, id_: UUID) -> SKUReadSchema | None:
         return self.by_id.get(id_)
+
+    async def delete(self, id_: UUID) -> bool:
+        self.deleted_ids.append(id_)
+        return self.by_id.pop(id_, None) is not None
 
     async def count_by_product(self, product_id: UUID) -> int:
         if product_id in self.count_by_product_overrides:

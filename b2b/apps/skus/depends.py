@@ -5,7 +5,7 @@ from apps.skus.repositories import (
     SKUImageRepository,
     SKURepository,
 )
-from apps.skus.use_cases import CreateSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase
 
 
 class SKUsProvider(Provider):
@@ -14,3 +14,4 @@ class SKUsProvider(Provider):
     sku_characteristic_repository = provide(SKUCharacteristicValueRepository, scope=Scope.REQUEST)
 
     create_sku_use_case = provide(CreateSKUUseCase, scope=Scope.REQUEST)
+    delete_sku_use_case = provide(DeleteSKUUseCase, scope=Scope.REQUEST)

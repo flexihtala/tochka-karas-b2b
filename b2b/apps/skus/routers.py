@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.skus.schemas.request import SKUCreateRequestSchema
 from apps.skus.schemas.response import SKUResponseSchema
-from apps.skus.use_cases import CreateSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/skus')
@@ -18,6 +18,12 @@ error_responses = {
     401: {'model': ErrorResponseSchema},
     403: {'model': ErrorResponseSchema},
     404: {'model': ErrorResponseSchema},
+}
+
+
+delete_responses = {
+    **error_responses,
+    409: {'model': ErrorResponseSchema},
 }
 
 
@@ -39,3 +45,18 @@ async def create_sku(
 @router.put('/{sku_id}', status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def edit_sku(sku_id: uuid.UUID) -> Response:
     return Response(status_code=status.HTTP_501_NOT_IMPLEMENTED)
+
+
+@router.delete(
+    '/{sku_id}',
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=delete_responses,
+)
+@inject
+async def delete_sku(
+    sku_id: uuid.UUID,
+    use_case: FromDishka[DeleteSKUUseCase],
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.SELLER)),
+) -> Response:
+    await use_case(sku_id, current_user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
