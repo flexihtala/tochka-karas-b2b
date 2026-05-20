@@ -48,3 +48,24 @@ uv run pytest -v
   глобально уникальны, так что нет коллизий при ссылках из заказов/корзин.
 - Меньше связности между сервисами на уровне БД — каждый сервис свободен в
   эволюции схемы (добавить `date_of_birth`, `loyalty_tier` и т.д.).
+
+## ADR — Idempotency для B2B-events (US-ORD-04)
+
+POST `/api/v1/events/product` идемпотентен по `(sender_service, idempotency_key)`.
+Хранилище — **таблица `processed_events`** (через `shared.inbox.IdempotentHandler`),
+а не Redis+TTL и не отдельная колонка на доменной таблице. Аргументы:
+
+- Транзакционно: запись в processed_events и доменные побочные эффекты
+  (`sku_unavailability`) живут в одной DB-транзакции, без распределённого
+  two-phase commit с внешним TTL-хранилищем.
+- Универсально: shared.inbox используется всеми сервисами, не вводим
+  per-domain idempotency-колонки на каждой таблице.
+- Достаточно для требований SLA на дедупликацию (24h TTL по канону достигается
+  scheduled job-ом по `created_at`; здесь не реализуется, но архитектурно нет
+  препятствий — это всего лишь DELETE WHERE created_at < now() - 24h).
+
+Cart-items НЕ модифицируются при событии: `cart_item.unavailable_reason`
+вычисляется на лету при `GET /cart` enrichment'е из B2B (см. US-CART-03).
+Локально пишем sku в `sku_unavailability` — это кэш для аналитики/инвалидации,
+не источник истины. Orders не затрагиваются: цены зафиксированы при checkout
+(canon Flow B2C-12).

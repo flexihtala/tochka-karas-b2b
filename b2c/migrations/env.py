@@ -7,6 +7,8 @@ from alembic import context
 from apps.addresses import models as addresses_models
 from apps.auth import models as auth_models
 from apps.cart import models as cart_models
+from apps.events import models as events_models
+from apps.inbox import models as inbox_models
 from apps.payment_methods import models as payment_methods_models
 from shared.db import Base
 from settings import settings
@@ -24,6 +26,8 @@ auth_models
 addresses_models
 payment_methods_models
 cart_models
+inbox_models
+events_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

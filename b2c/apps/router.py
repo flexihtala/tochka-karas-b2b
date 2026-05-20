@@ -4,6 +4,7 @@ from .addresses.routers import router as addresses_router
 from .auth.routers import router as auth_router
 from .buyers.routers import router as buyers_router
 from .cart.routers import router as cart_router
+from .events.routers import router as events_router
 from .payment_methods.routers import router as payment_methods_router
 
 router = APIRouter(prefix='/api/v1')
@@ -13,3 +14,4 @@ router.include_router(buyers_router)
 router.include_router(addresses_router)
 router.include_router(payment_methods_router)
 router.include_router(cart_router)
+router.include_router(events_router)
