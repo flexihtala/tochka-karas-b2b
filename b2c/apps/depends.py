@@ -4,6 +4,7 @@ from apps.addresses.depends import AddressesProvider
 from apps.auth.depends import AuthProvider
 from apps.buyers.depends import BuyersProvider
 from apps.payment_methods.depends import PaymentMethodsProvider
+from apps.subscriptions.depends import SubscriptionsProvider
 from shared.db import SessionManager
 from settings import B2CSettings, settings
 
@@ -24,4 +25,5 @@ providers = [
     BuyersProvider(),
     AddressesProvider(),
     PaymentMethodsProvider(),
+    SubscriptionsProvider(),
 ]
