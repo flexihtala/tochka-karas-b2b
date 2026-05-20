@@ -1,10 +1,22 @@
+from uuid import UUID
+
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Request, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
-from apps.home.schemas import BannerClickRequestSchema, BannerResponseSchema
-from apps.home.use_cases import ClickBannerUseCase, ListBannersUseCase
+from apps.home.schemas import (
+    BannerClickRequestSchema,
+    BannerResponseSchema,
+    CollectionMetaResponseSchema,
+    CollectionProductsResponseSchema,
+)
+from apps.home.use_cases import (
+    ClickBannerUseCase,
+    GetCollectionProductsUseCase,
+    ListBannersUseCase,
+    ListCollectionsUseCase,
+)
 from shared.auth_lib import AuthenticatedUserSchema
 
 router = APIRouter()
@@ -12,6 +24,7 @@ router = APIRouter()
 
 error_responses = {
     400: {'model': ErrorResponseSchema},
+    404: {'model': ErrorResponseSchema},
 }
 
 
@@ -39,3 +52,28 @@ async def post_banner_event(
     user: AuthenticatedUserSchema | None = getattr(request.state, 'user', None)
     await use_case(data, user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    '/home/collections',
+    response_model=list[CollectionMetaResponseSchema],
+    responses=error_responses,
+)
+@inject
+async def list_home_collections(
+    use_case: FromDishka[ListCollectionsUseCase],
+) -> list[CollectionMetaResponseSchema]:
+    return await use_case()
+
+
+@router.get(
+    '/home/collections/{collection_id}/products',
+    response_model=CollectionProductsResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def get_home_collection_products(
+    collection_id: UUID,
+    use_case: FromDishka[GetCollectionProductsUseCase],
+) -> CollectionProductsResponseSchema:
+    return await use_case(collection_id)
