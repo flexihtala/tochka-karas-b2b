@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from apps.categories.schemas import CategoryCreateSchema, CategoryReadSchema, CategoryUpdateSchema
+from apps.products.enums import ProductStatus
 from apps.products.schemas.db import (
     CharacteristicValueCreateSchema,
     CharacteristicValueReadSchema,
@@ -80,6 +81,59 @@ class FakeProductRepository:
 
     async def get_or_none(self, id_: UUID) -> ProductReadSchema | None:
         return self.by_id.get(id_)
+
+    def add(
+        self,
+        *,
+        seller_id: UUID,
+        title: str = 'iPhone 15 Pro Max',
+        slug: str | None = None,
+        description: str = 'Флагман Apple',
+        category_id: UUID | None = None,
+        status: ProductStatus = ProductStatus.CREATED,
+        deleted: bool = False,
+        created_at: datetime | None = None,
+    ) -> ProductReadSchema:
+        product_id = uuid4()
+        now = created_at or datetime.now(UTC)
+        product = ProductReadSchema(
+            id=product_id,
+            seller_id=seller_id,
+            category_id=category_id or uuid4(),
+            title=title,
+            slug=slug or f'slug-{product_id.hex[:8]}',
+            description=description,
+            status=status,
+            deleted=deleted,
+            blocking_reason_id=None,
+            moderator_comment=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[product_id] = product
+        return product
+
+    async def list_for_seller(
+        self,
+        *,
+        seller_id: UUID,
+        limit: int,
+        offset: int,
+        status: ProductStatus | None = None,
+        include_deleted: bool = False,
+        search: str | None = None,
+    ) -> tuple[list[ProductReadSchema], int]:
+        rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
+        if not include_deleted:
+            rows = [p for p in rows if not p.deleted]
+        if status is not None:
+            rows = [p for p in rows if p.status == status]
+        if search:
+            needle = search.lower()
+            rows = [p for p in rows if needle in p.title.lower()]
+        rows.sort(key=lambda p: p.created_at, reverse=True)
+        total_count = len(rows)
+        return rows[offset : offset + limit], total_count
 
 
 class FakeProductImageRepository:
