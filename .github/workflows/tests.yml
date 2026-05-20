@@ -6,11 +6,8 @@ on:
     branches: ["main"]
 
 jobs:
-  lint-b2b:
+  lint:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./b2b
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
@@ -19,13 +16,29 @@ jobs:
       - name: install_uv
         run: |
           pip install uv
-          uv sync --all-extras
-      - name: lint
+          uv sync --all-packages --all-extras
+      - name: ruff
         run: uv run ruff check .
+
+  test-shared:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: install_uv
+        run: |
+          pip install uv
+          uv sync --all-packages --all-extras
+      - name: test shared
+        working-directory: ./shared
+        run: uv run pytest tests -v
 
   test-b2b:
     runs-on: ubuntu-latest
-    needs: lint-b2b
+    needs: lint
     defaults:
       run:
         working-directory: ./b2b
@@ -37,8 +50,8 @@ jobs:
       - name: install_uv
         run: |
           pip install uv
-          uv sync --all-extras
-      - name: tests
+          uv sync --all-packages --all-extras
+      - name: test b2b
         run: |
           uv run pytest \
             --cov=. \
