@@ -1,15 +1,24 @@
-"""US-ORD-01: POST /api/v1/orders — checkout.
+"""US-ORD-01 / US-ORD-02:
+- POST   /api/v1/orders          — checkout (US-ORD-01)
+- GET    /api/v1/orders          — list orders (US-ORD-02)
+- GET    /api/v1/orders/{id}     — order detail (US-ORD-02)
 
-Auth: Bearer JWT, role BUYER. user_id берётся из JWT (никогда из body/query).
+Auth: Bearer JWT, role BUYER. user_id из JWT (никогда из body/query).
 """
+
+from uuid import UUID
 
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
-from apps.orders.schemas import CheckoutRequestSchema, OrderResponseSchema
-from apps.orders.use_cases import CheckoutUseCase
+from apps.orders.schemas import (
+    CheckoutRequestSchema,
+    OrderListResponseSchema,
+    OrderResponseSchema,
+)
+from apps.orders.use_cases import CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/orders')
@@ -40,3 +49,33 @@ async def create_order(
     order, created = await use_case(data, current_user)
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return order
+
+
+@router.get(
+    '',
+    response_model=OrderListResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def list_orders(
+    use_case: FromDishka[ListOrdersUseCase],
+    status_filter: str | None = Query(default=None, alias='status'),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
+) -> OrderListResponseSchema:
+    return await use_case(current_user, status=status_filter, limit=limit, offset=offset)
+
+
+@router.get(
+    '/{order_id}',
+    response_model=OrderResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def get_order(
+    order_id: UUID,
+    use_case: FromDishka[GetOrderUseCase],
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
+) -> OrderResponseSchema:
+    return await use_case(order_id, current_user)
