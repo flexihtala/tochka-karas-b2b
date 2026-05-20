@@ -4,8 +4,9 @@ from dishka import Provider, Scope, provide
 from fastapi import Header
 
 from apps.inbox.repositories import InboxRepository
-from apps.inventory.repositories import InventoryRepository
+from apps.inventory.repositories import FulfilledOrderRepository, InventoryRepository
 from apps.inventory.use_cases import (
+    FulfillInventoryUseCase,
     ReserveInventoryUseCase,
     UnreserveInventoryUseCase,
 )
@@ -40,6 +41,8 @@ def _expected_key() -> str:
 class InventoryProvider(Provider):
     inventory_repository = provide(InventoryRepository, scope=Scope.REQUEST)
     inbox_repository = provide(InboxRepository, scope=Scope.REQUEST)
+    fulfilled_order_repository = provide(FulfilledOrderRepository, scope=Scope.REQUEST)
 
     reserve_use_case = provide(ReserveInventoryUseCase, scope=Scope.REQUEST)
     unreserve_use_case = provide(UnreserveInventoryUseCase, scope=Scope.REQUEST)
+    fulfill_use_case = provide(FulfillInventoryUseCase, scope=Scope.REQUEST)

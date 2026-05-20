@@ -32,3 +32,16 @@ class UnreserveRequestSchema(BaseModel):
 
     idempotency_key: UUID
     items: list[InventoryItemRequestSchema] = Field(min_length=1)
+
+
+class FulfillRequestSchema(BaseModel):
+    """Тело POST /api/v1/inventory/fulfill (US-B2B-10).
+
+    Списание резерва при доставке. Идемпотентность — по `order_id` через таблицу
+    `fulfilled_orders` (UNIQUE(order_id, sku_id)); повторный вызов с тем же
+    order_id возвращает 200 без изменений (см. apps/inventory/use_cases/fulfill.py
+    и ADR-0002).
+    """
+
+    order_id: UUID
+    items: list[InventoryItemRequestSchema] = Field(min_length=1)

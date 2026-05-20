@@ -38,3 +38,14 @@ class UnreserveResponseSchema(BaseModel):
     """Ответ POST /inventory/unreserve. Канон: `{ok: true}`."""
 
     ok: bool = True
+
+
+class FulfillResponseSchema(BaseModel):
+    """Ответ POST /inventory/fulfill (US-B2B-10). Канон: `{ok: true}`.
+
+    Не возвращаем подробное состояние SKU: fulfill идёт после оператора-менеджера
+    и B2C нужен только сигнал «принято». Повтор по тому же `order_id` — тот же
+    `{ok: true}`.
+    """
+
+    ok: bool = True

@@ -1,1 +1,2 @@
+from .fulfilled_order_repository import FulfilledOrderRepository as FulfilledOrderRepository
 from .inventory_repository import InventoryRepository as InventoryRepository
