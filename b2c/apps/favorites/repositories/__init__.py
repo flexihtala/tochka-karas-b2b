@@ -1,0 +1,1 @@
+from .favorite_repository import FavoriteRepository as FavoriteRepository
