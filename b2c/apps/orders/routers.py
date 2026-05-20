@@ -1,7 +1,8 @@
-"""US-ORD-01 / US-ORD-02:
-- POST   /api/v1/orders          — checkout (US-ORD-01)
-- GET    /api/v1/orders          — list orders (US-ORD-02)
-- GET    /api/v1/orders/{id}     — order detail (US-ORD-02)
+"""US-ORD-01 / US-ORD-02 / US-ORD-03:
+- POST   /api/v1/orders                  — checkout (US-ORD-01)
+- GET    /api/v1/orders                  — list orders (US-ORD-02)
+- GET    /api/v1/orders/{id}             — order detail (US-ORD-02)
+- POST   /api/v1/orders/{id}/cancel      — cancel (US-ORD-03)
 
 Auth: Bearer JWT, role BUYER. user_id из JWT (никогда из body/query).
 """
@@ -18,7 +19,7 @@ from apps.orders.schemas import (
     OrderListResponseSchema,
     OrderResponseSchema,
 )
-from apps.orders.use_cases import CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
+from apps.orders.use_cases import CancelOrderUseCase, CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/orders')
@@ -76,6 +77,20 @@ async def list_orders(
 async def get_order(
     order_id: UUID,
     use_case: FromDishka[GetOrderUseCase],
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
+) -> OrderResponseSchema:
+    return await use_case(order_id, current_user)
+
+
+@router.post(
+    '/{order_id}/cancel',
+    response_model=OrderResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def cancel_order(
+    order_id: UUID,
+    use_case: FromDishka[CancelOrderUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
 ) -> OrderResponseSchema:
     return await use_case(order_id, current_user)

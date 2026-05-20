@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.errors import setup_error_handlers
-from apps.orders.errors import OrderNotFoundError
+from apps.orders.errors import CancelNotAllowedError, OrderNotFoundError
 from apps.orders.routers import router as orders_router
 from apps.orders.schemas.response import (
     OrderItemResponseSchema,
@@ -19,7 +19,7 @@ from apps.orders.schemas.response import (
     OrderListResponseSchema,
     OrderResponseSchema,
 )
-from apps.orders.use_cases import CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
+from apps.orders.use_cases import CancelOrderUseCase, CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
@@ -84,11 +84,25 @@ class StubCheckout:
         raise NotImplementedError
 
 
+class StubCancelOrder:
+    def __init__(self):
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.error: Exception | None = None
+        self.response: OrderResponseSchema | None = None
+
+    async def __call__(self, order_id: UUID, current_user: AuthenticatedUserSchema) -> OrderResponseSchema:
+        self.calls.append((order_id, current_user))
+        if self.error:
+            raise self.error
+        return self.response or _make_order(order_id)
+
+
 class OrdersRouteProvider(Provider):
-    def __init__(self, list_stub: StubListOrders, get_stub: StubGetOrder):
+    def __init__(self, list_stub: StubListOrders, get_stub: StubGetOrder, cancel_stub: StubCancelOrder):
         super().__init__()
         self.list_stub = list_stub
         self.get_stub = get_stub
+        self.cancel_stub = cancel_stub
 
     @provide(scope=Scope.REQUEST)
     def get_checkout(self) -> CheckoutUseCase:
@@ -102,8 +116,12 @@ class OrdersRouteProvider(Provider):
     def get_detail(self) -> GetOrderUseCase:
         return self.get_stub  # type: ignore[return-value]
 
+    @provide(scope=Scope.REQUEST)
+    def get_cancel(self) -> CancelOrderUseCase:
+        return self.cancel_stub  # type: ignore[return-value]
 
-def _make_app(list_stub, get_stub, user) -> FastAPI:
+
+def _make_app(list_stub, get_stub, cancel_stub, user) -> FastAPI:
     class _UserInjector(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             request.state.user = user
@@ -115,7 +133,7 @@ def _make_app(list_stub, get_stub, user) -> FastAPI:
     setup_error_handlers(app)
     container = make_async_container(
         FastapiProvider(),
-        OrdersRouteProvider(list_stub, get_stub),
+        OrdersRouteProvider(list_stub, get_stub, cancel_stub),
     )
     setup_dishka(container, app)
     return app
@@ -123,11 +141,11 @@ def _make_app(list_stub, get_stub, user) -> FastAPI:
 
 @pytest.fixture
 def stubs():
-    return StubListOrders(), StubGetOrder()
+    return StubListOrders(), StubGetOrder(), StubCancelOrder()
 
 
 def test_list_orders_returns_200(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     list_stub.response = OrderListResponseSchema(
         items=[
@@ -144,7 +162,7 @@ def test_list_orders_returns_200(stubs):
         limit=20,
         offset=0,
     )
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
 
     response = client.get('/api/v1/orders')
 
@@ -157,9 +175,9 @@ def test_list_orders_returns_200(stubs):
 
 
 def test_list_orders_with_status_filter(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
 
     client.get('/api/v1/orders?status=DELIVERED&limit=5&offset=10')
 
@@ -169,25 +187,25 @@ def test_list_orders_with_status_filter(stubs):
 
 
 def test_list_orders_unauthorized_returns_401(stubs):
-    list_stub, get_stub = stubs
-    client = TestClient(_make_app(list_stub, get_stub, user=None))
+    list_stub, get_stub, cancel_stub = stubs
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=None))
     response = client.get('/api/v1/orders')
     assert response.status_code == 401
 
 
 def test_list_orders_non_buyer_returns_403(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
     response = client.get('/api/v1/orders')
     assert response.status_code == 403
 
 
 def test_get_order_returns_200(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     order_id = uuid4()
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
 
     response = client.get(f'/api/v1/orders/{order_id}')
 
@@ -197,10 +215,10 @@ def test_get_order_returns_200(stubs):
 
 
 def test_get_order_returns_404_for_other_user(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     get_stub.error = OrderNotFoundError()
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
 
     response = client.get(f'/api/v1/orders/{uuid4()}')
 
@@ -210,15 +228,60 @@ def test_get_order_returns_404_for_other_user(stubs):
 
 
 def test_get_order_unauthorized_returns_401(stubs):
-    list_stub, get_stub = stubs
-    client = TestClient(_make_app(list_stub, get_stub, user=None))
+    list_stub, get_stub, cancel_stub = stubs
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=None))
     response = client.get(f'/api/v1/orders/{uuid4()}')
     assert response.status_code == 401
 
 
 def test_get_order_invalid_uuid_returns_400(stubs):
-    list_stub, get_stub = stubs
+    list_stub, get_stub, cancel_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(list_stub, get_stub, user=user))
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
     response = client.get('/api/v1/orders/not-a-uuid')
     assert response.status_code == 400
+
+
+def test_cancel_order_returns_200(stubs):
+    list_stub, get_stub, cancel_stub = stubs
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    order_id = uuid4()
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{order_id}/cancel')
+
+    assert response.status_code == 200
+    assert cancel_stub.calls[0][0] == order_id
+    assert cancel_stub.calls[0][1].id == user.id
+
+
+def test_cancel_order_not_allowed_returns_409(stubs):
+    list_stub, get_stub, cancel_stub = stubs
+    cancel_stub.error = CancelNotAllowedError(current_status='ASSEMBLING')
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body['code'] == 'CANCEL_NOT_ALLOWED'
+    assert body['current_status'] == 'ASSEMBLING'
+
+
+def test_cancel_other_user_returns_404(stubs):
+    list_stub, get_stub, cancel_stub = stubs
+    cancel_stub.error = OrderNotFoundError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 404
+
+
+def test_cancel_unauthorized_returns_401(stubs):
+    list_stub, get_stub, cancel_stub = stubs
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=None))
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+    assert response.status_code == 401
