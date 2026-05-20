@@ -64,3 +64,22 @@ class CancelNotAllowedError(OrderError):
             extra={'current_status': current_status},
         )
         self.current_status = current_status
+
+
+class DeliverNotAllowedError(OrderError):
+    """409 DELIVER_NOT_ALLOWED — заказ нельзя перевести в DELIVERED.
+
+    Канон (b2c-orders-flows.md, §"Смена статусов через Django Admin"): переход
+    допустим только из DELIVERING. Любая другая исходная позиция — ошибка
+    оператора (например, нельзя перескочить PAID -> DELIVERED).
+    Уже DELIVERED-заказ обрабатывается use-case'ом идемпотентно (не как ошибка).
+    """
+
+    def __init__(self, current_status: str):
+        super().__init__(
+            'DELIVER_NOT_ALLOWED',
+            f'Перевод в DELIVERED невозможен: заказ в статусе {current_status}',
+            409,
+            extra={'current_status': current_status},
+        )
+        self.current_status = current_status

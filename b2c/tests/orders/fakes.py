@@ -36,6 +36,9 @@ class FakeOrderRepository:
             return None
         return order
 
+    async def get_or_none(self, order_id: UUID) -> OrderReadSchema | None:
+        return self.by_id.get(order_id)
+
     async def list_for_user(
         self,
         user_id: UUID,
