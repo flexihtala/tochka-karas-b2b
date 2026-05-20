@@ -1,3 +1,0 @@
-from .characteristic_repository import CharacteristicValueRepository as CharacteristicValueRepository
-from .image_repository import ProductImageRepository as ProductImageRepository
-from .product_repository import ProductRepository as ProductRepository
