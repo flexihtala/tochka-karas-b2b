@@ -172,13 +172,15 @@ def test_get_tree_returns_200(client, stubs):
         ]
     )
 
-    response = client.get('/api/v1/categories/tree')
+    response = client.get('/api/v1/catalog/categories/tree')
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body['items']) == 1
-    assert body['items'][0]['slug'] == 'electronics'
-    assert body['items'][0]['children'][0]['slug'] == 'phones'
+    # Per openapi spec: flat array of CategoryTreeNode at the root
+    assert isinstance(body, list)
+    assert len(body) == 1
+    assert body[0]['slug'] == 'electronics'
+    assert body[0]['children'][0]['slug'] == 'phones'
     assert tree_stub.calls == 1
 
 
@@ -186,7 +188,7 @@ def test_get_tree_orphan_returns_422(client, stubs):
     tree_stub, _, _ = stubs
     tree_stub.error = OrphanCategoryNodeError()
 
-    response = client.get('/api/v1/categories/tree')
+    response = client.get('/api/v1/catalog/categories/tree')
 
     assert response.status_code == 422
     assert response.json() == {
@@ -199,7 +201,7 @@ def test_get_category_returns_200(client, stubs):
     _, category_stub, _ = stubs
     category_id = uuid4()
 
-    response = client.get(f'/api/v1/categories/{category_id}')
+    response = client.get(f'/api/v1/catalog/categories/{category_id}')
 
     assert response.status_code == 200
     body = response.json()
@@ -212,7 +214,7 @@ def test_get_category_returns_404_for_missing(client, stubs):
     _, category_stub, _ = stubs
     category_stub.error = CategoryNotFoundError()
 
-    response = client.get(f'/api/v1/categories/{uuid4()}')
+    response = client.get(f'/api/v1/catalog/categories/{uuid4()}')
 
     assert response.status_code == 404
     assert response.json() == {'code': 'NOT_FOUND', 'message': 'Категория не найдена'}
@@ -222,7 +224,7 @@ def test_breadcrumbs_with_category_id_returns_200(client, stubs):
     _, _, breadcrumbs_stub = stubs
     category_id = uuid4()
 
-    response = client.get(f'/api/v1/categories/breadcrumbs?category_id={category_id}')
+    response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={category_id}')
 
     assert response.status_code == 200
     body = response.json()
@@ -235,7 +237,7 @@ def test_breadcrumbs_with_product_id_returns_200(client, stubs):
     _, _, breadcrumbs_stub = stubs
     product_id = uuid4()
 
-    response = client.get(f'/api/v1/categories/breadcrumbs?product_id={product_id}')
+    response = client.get(f'/api/v1/catalog/categories/breadcrumbs?product_id={product_id}')
 
     assert response.status_code == 200
     body = response.json()
@@ -247,7 +249,7 @@ def test_breadcrumbs_ambiguous_returns_400(client, stubs):
     _, _, breadcrumbs_stub = stubs
     breadcrumbs_stub.error = AmbiguousBreadcrumbsParamsError()
 
-    response = client.get(f'/api/v1/categories/breadcrumbs?category_id={uuid4()}&product_id={uuid4()}')
+    response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}&product_id={uuid4()}')
 
     assert response.status_code == 400
     assert response.json()['code'] == 'ambiguous_param'
@@ -257,7 +259,7 @@ def test_breadcrumbs_missing_returns_400(client, stubs):
     _, _, breadcrumbs_stub = stubs
     breadcrumbs_stub.error = MissingBreadcrumbsParamsError()
 
-    response = client.get('/api/v1/categories/breadcrumbs')
+    response = client.get('/api/v1/catalog/categories/breadcrumbs')
 
     assert response.status_code == 400
     assert response.json()['code'] == 'missing_param'
@@ -267,7 +269,7 @@ def test_breadcrumbs_orphan_returns_422(client, stubs):
     _, _, breadcrumbs_stub = stubs
     breadcrumbs_stub.error = OrphanCategoryNodeError()
 
-    response = client.get(f'/api/v1/categories/breadcrumbs?category_id={uuid4()}')
+    response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}')
 
     assert response.status_code == 422
     assert response.json()['code'] == 'orphan_node'
@@ -277,13 +279,13 @@ def test_breadcrumbs_unknown_category_returns_404(client, stubs):
     _, _, breadcrumbs_stub = stubs
     breadcrumbs_stub.error = CategoryNotFoundError()
 
-    response = client.get(f'/api/v1/categories/breadcrumbs?category_id={uuid4()}')
+    response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}')
 
     assert response.status_code == 404
     assert response.json()['code'] == 'NOT_FOUND'
 
 
 def test_breadcrumbs_invalid_uuid_returns_400(client):
-    response = client.get('/api/v1/categories/breadcrumbs?category_id=not-a-uuid')
+    response = client.get('/api/v1/catalog/categories/breadcrumbs?category_id=not-a-uuid')
 
     assert response.status_code == 400

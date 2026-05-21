@@ -8,6 +8,7 @@ from apps.auth.schemas import ErrorResponseSchema
 from apps.categories.schemas import (
     BreadcrumbsResponseSchema,
     CategoryResponseSchema,
+    CategoryTreeNodeSchema,
     CategoryTreeResponseSchema,
 )
 from apps.categories.use_cases import (
@@ -16,7 +17,7 @@ from apps.categories.use_cases import (
     GetTreeUseCase,
 )
 
-router = APIRouter(prefix='/categories', tags=['Categories'])
+router = APIRouter(prefix='/catalog/categories', tags=['Categories'])
 
 
 error_responses = {
@@ -28,15 +29,16 @@ error_responses = {
 
 @router.get(
     '/tree',
-    response_model=CategoryTreeResponseSchema,
+    response_model=list[CategoryTreeNodeSchema],
     responses={422: {'model': ErrorResponseSchema}},
 )
 @inject
 async def get_categories_tree(
     use_case: FromDishka[GetTreeUseCase],
-) -> CategoryTreeResponseSchema:
-    """Полное вложенное дерево категорий. Публичный эндпоинт."""
-    return await use_case()
+) -> list[CategoryTreeNodeSchema]:
+    """GET /api/v1/catalog/categories/tree — flat array of root nodes per openapi spec."""
+    response: CategoryTreeResponseSchema = await use_case()
+    return response.items
 
 
 @router.get(
