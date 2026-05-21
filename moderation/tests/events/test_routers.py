@@ -121,7 +121,7 @@ def client(stubs) -> TestClient:
     return TestClient(app)
 
 
-def _payload(event_type: str = 'CREATED', idempotency_key: UUID | None = None) -> dict:
+def _payload(event_type: str = 'PRODUCT_CREATED', idempotency_key: UUID | None = None) -> dict:
     return {
         'event_type': event_type,
         'idempotency_key': str(idempotency_key or uuid4()),
@@ -209,7 +209,7 @@ def test_use_case_404_returns_404(client: TestClient, stubs):
     use_case_stub.error = TicketNotFoundForEditError()
     response = client.post(
         '/api/v1/b2b/events',
-        json=_payload(event_type='EDITED'),
+        json=_payload(event_type='PRODUCT_EDITED'),
         headers={'X-Service-Key': settings.b2b_to_mod_key},
     )
     assert response.status_code == 404

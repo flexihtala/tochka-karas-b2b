@@ -4,12 +4,11 @@ ADR (M3): обработка событий B2B напрямую дергает 
 TicketService. На M3 поведение тривиально (PENDING/ARCHIVED), полноценный
 TicketService с FSM-логикой появится в M4/M5, когда добавятся claim/release/decision.
 
-Логика согласно спеке + moderation-flows.md (упрощённая M3-версия — без HARD_BLOCKED,
-без вызовов B2B GET /products/{id}, без queue_priority вычисления):
-- CREATED:  создать новый ticket(status=PENDING).
-- EDITED:   найти активный ticket по product_id → status=PENDING (сброс claim).
-            Если активного нет → 404.
-- DELETED:  ARCHIVE все НЕ ARCHIVED тикеты товара. Идемпотентно: если ничего нет — ok.
+Логика согласно спеке `neomarket-moderation.yaml` (IncomingB2BEvent.event_type):
+- PRODUCT_CREATED:  создать новый ticket(kind=CREATE, status=PENDING).
+- PRODUCT_EDITED:   найти активный ticket по product_id → status=PENDING (сброс claim).
+                    Если активного нет → 404.
+- PRODUCT_DELETED:  ARCHIVE все НЕ ARCHIVED тикеты товара. Идемпотентно.
 """
 
 from apps.events.errors import TicketNotFoundForEditError, UnsupportedEventTypeError
@@ -26,11 +25,11 @@ class HandleB2BEventUseCase:
 
     async def __call__(self, event: IncomingB2BEventSchema) -> EventAcceptedResponseSchema:
         match event.event_type:
-            case B2BEventTypeEnum.CREATED:
+            case B2BEventTypeEnum.PRODUCT_CREATED:
                 return await self._on_created(event)
-            case B2BEventTypeEnum.EDITED:
+            case B2BEventTypeEnum.PRODUCT_EDITED:
                 return await self._on_edited(event)
-            case B2BEventTypeEnum.DELETED:
+            case B2BEventTypeEnum.PRODUCT_DELETED:
                 return await self._on_deleted(event)
             case _:
                 # Pydantic уже отфильтрует, но защитим use-case.
@@ -41,7 +40,7 @@ class HandleB2BEventUseCase:
         if seller_id is None:
             # Согласно спеке EventProductCreated.seller_id обязательно — но в B2BEventPayloadSchema
             # делаем optional, поэтому проверяем явно.
-            raise UnsupportedEventTypeError('CREATED без seller_id')
+            raise UnsupportedEventTypeError('PRODUCT_CREATED без seller_id')
         ticket = await self.ticket_repository.create(
             TicketCreateSchema(
                 product_id=event.payload.product_id,

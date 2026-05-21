@@ -13,10 +13,11 @@ async def test_moderators_stats_aggregates_per_moderator():
     mod_a = uuid4()
     mod_b = uuid4()
 
-    # Модератор A: 2 APPROVED, 1 BLOCKED, 1 IN_REVIEW.
+    # Модератор A: 2 APPROVED, 1 BLOCKED, 1 HARD_BLOCKED, 1 IN_REVIEW.
     repo.add(make_ticket_read_schema(claimed_by=mod_a, status=TicketStatus.APPROVED.value))
     repo.add(make_ticket_read_schema(claimed_by=mod_a, status=TicketStatus.APPROVED.value))
     repo.add(make_ticket_read_schema(claimed_by=mod_a, status=TicketStatus.BLOCKED.value))
+    repo.add(make_ticket_read_schema(claimed_by=mod_a, status=TicketStatus.HARD_BLOCKED.value))
     repo.add(make_ticket_read_schema(claimed_by=mod_a, status=TicketStatus.IN_REVIEW.value))
 
     # Модератор B: 3 APPROVED.
@@ -32,16 +33,18 @@ async def test_moderators_stats_aggregates_per_moderator():
     by_id = {r.moderator_id: r for r in result}
     assert set(by_id.keys()) == {mod_a, mod_b}
 
+    # Спека ModeratorStats: moderator_id + decisions_count обязательны; in_review_count
+    # из спеки не предусмотрен и удалён.
     a = by_id[mod_a]
     assert a.approved_count == 2
     assert a.blocked_count == 1
-    assert a.in_review_count == 1
-    assert a.decisions_count == 3  # 2 approved + 1 blocked
+    assert a.hard_blocked_count == 1
+    assert a.decisions_count == 4  # 2 approved + 1 blocked + 1 hard_blocked
 
     b = by_id[mod_b]
     assert b.approved_count == 3
     assert b.blocked_count == 0
-    assert b.in_review_count == 0
+    assert b.hard_blocked_count == 0
     assert b.decisions_count == 3
 
 

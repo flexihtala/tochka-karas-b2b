@@ -1,6 +1,8 @@
+from enum import StrEnum
+
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from apps.auth.schemas import ErrorResponseSchema
 from apps.stats.schemas import (
@@ -11,6 +13,12 @@ from apps.stats.use_cases import ModeratorsStatsUseCase, OverviewStatsUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/stats', tags=['Stats'])
+
+
+class StatsPeriodEnum(StrEnum):
+    TODAY = 'today'
+    WEEK = 'week'
+    MONTH = 'month'
 
 
 error_responses = {
@@ -28,10 +36,14 @@ error_responses = {
 async def get_overview(
     use_case: FromDishka[OverviewStatsUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.MODERATOR, UserRole.ADMIN)),
+    period: StatsPeriodEnum = Query(default=StatsPeriodEnum.TODAY),
 ) -> StatsOverviewResponseSchema:
-    """Сводка по тикетам. Доступно модераторам и админам."""
+    """Сводка по тикетам. Доступно модераторам и админам.
+
+    period (today|week|month, default today) — задел на агрегацию за период (M4).
+    """
     _ = current_user
-    return await use_case()
+    return await use_case(period=period.value)
 
 
 @router.get(
@@ -43,7 +55,11 @@ async def get_overview(
 async def get_moderators(
     use_case: FromDishka[ModeratorsStatsUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.MODERATOR, UserRole.ADMIN)),
+    period: StatsPeriodEnum = Query(default=StatsPeriodEnum.WEEK),
 ) -> list[ModeratorStatsResponseSchema]:
-    """Per-moderator аггрегаты. Доступно модераторам и админам."""
+    """Per-moderator аггрегаты. Доступно модераторам и админам.
+
+    period (today|week|month, default week) — задел на агрегацию за период (M4).
+    """
     _ = current_user
-    return await use_case()
+    return await use_case(period=period.value)

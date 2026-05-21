@@ -4,18 +4,17 @@ from enum import StrEnum
 class TicketStatus(StrEnum):
     """Статусы тикета модерации.
 
-    Жизненный цикл (упрощённый, в M3 используется только PENDING и ARCHIVED):
-    - PENDING — ожидает модератора.
-    - IN_REVIEW — модератор взял тикет в работу.
-    - APPROVED — товар одобрен.
-    - BLOCKED — товар заблокирован.
-    - ARCHIVED — тикет закрыт (DELETED event от B2B).
+    Спека `neomarket-moderation.yaml`: PENDING → IN_REVIEW → (APPROVED | BLOCKED |
+    HARD_BLOCKED). ARCHIVED — служебный для DELETED-событий от b2b (вне публичного
+    API-флоу, спекой не определён, но необходим как маркер закрытия тикета).
 
-    HARD_BLOCKED из спеки в M3 не моделируется (вводится в M2/M4); расширим позже.
+    На M3 use-cases используют PENDING и ARCHIVED; HARD_BLOCKED появится в stats
+    после интеграции с M2.
     """
 
     PENDING = 'PENDING'
     IN_REVIEW = 'IN_REVIEW'
     APPROVED = 'APPROVED'
     BLOCKED = 'BLOCKED'
+    HARD_BLOCKED = 'HARD_BLOCKED'
     ARCHIVED = 'ARCHIVED'

@@ -16,35 +16,35 @@ from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 class StubOverviewUseCase:
     def __init__(self):
-        self.calls: int = 0
+        self.calls: list[str | None] = []
         self.response = StatsOverviewResponseSchema(
-            total_tickets=10,
             pending_count=3,
             in_review_count=1,
             approved_count=4,
             blocked_count=2,
+            hard_blocked_count=1,
         )
 
-    async def __call__(self) -> StatsOverviewResponseSchema:
-        self.calls += 1
+    async def __call__(self, period: str | None = None) -> StatsOverviewResponseSchema:
+        self.calls.append(period)
         return self.response
 
 
 class StubModeratorsStatsUseCase:
     def __init__(self):
-        self.calls: int = 0
+        self.calls: list[str | None] = []
         self.response: list[ModeratorStatsResponseSchema] = [
             ModeratorStatsResponseSchema(
                 moderator_id=uuid4(),
                 decisions_count=5,
                 approved_count=3,
                 blocked_count=2,
-                in_review_count=1,
+                hard_blocked_count=0,
             )
         ]
 
-    async def __call__(self) -> list[ModeratorStatsResponseSchema]:
-        self.calls += 1
+    async def __call__(self, period: str | None = None) -> list[ModeratorStatsResponseSchema]:
+        self.calls.append(period)
         return self.response
 
 
@@ -97,7 +97,7 @@ def test_overview_requires_authentication(stubs):
     response = client.get('/api/v1/stats/overview')
 
     assert response.status_code == 401
-    assert overview_stub.calls == 0
+    assert overview_stub.calls == []
 
 
 def test_overview_rejects_seller_role(stubs):
@@ -108,7 +108,7 @@ def test_overview_rejects_seller_role(stubs):
     response = client.get('/api/v1/stats/overview')
 
     assert response.status_code == 403
-    assert overview_stub.calls == 0
+    assert overview_stub.calls == []
 
 
 def test_overview_allows_moderator(stubs):
@@ -116,15 +116,18 @@ def test_overview_allows_moderator(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.MODERATOR)
     client = TestClient(_make_app(overview_stub, moderators_stub, user))
 
-    response = client.get('/api/v1/stats/overview')
+    response = client.get('/api/v1/stats/overview?period=week')
 
     assert response.status_code == 200
     body = response.json()
-    assert body['total_tickets'] == 10
+    # Спека StatsOverview: per-status counts (без total_tickets).
     assert body['pending_count'] == 3
+    assert body['hard_blocked_count'] == 1
+    assert 'total_tickets' not in body
+    assert overview_stub.calls == ['week']
 
 
-def test_overview_allows_admin(stubs):
+def test_overview_default_period_is_today(stubs):
     overview_stub, moderators_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.ADMIN)
     client = TestClient(_make_app(overview_stub, moderators_stub, user))
@@ -132,7 +135,7 @@ def test_overview_allows_admin(stubs):
     response = client.get('/api/v1/stats/overview')
 
     assert response.status_code == 200
-    assert overview_stub.calls == 1
+    assert overview_stub.calls == ['today']
 
 
 def test_moderators_stats_requires_auth(stubs):

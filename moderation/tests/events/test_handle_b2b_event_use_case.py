@@ -35,7 +35,7 @@ async def test_created_event_creates_pending_ticket():
     product_id = uuid4()
     seller_id = uuid4()
 
-    response = await use_case(_make_event(B2BEventTypeEnum.CREATED, product_id=product_id, seller_id=seller_id))
+    response = await use_case(_make_event(B2BEventTypeEnum.PRODUCT_CREATED, product_id=product_id, seller_id=seller_id))
 
     assert response.ticket_id is not None
     assert len(repo.created) == 1
@@ -59,7 +59,7 @@ async def test_edited_event_resets_existing_ticket_to_pending():
     repo.add(existing)
 
     use_case = HandleB2BEventUseCase(ticket_repository=repo)
-    response = await use_case(_make_event(B2BEventTypeEnum.EDITED, product_id=product_id))
+    response = await use_case(_make_event(B2BEventTypeEnum.PRODUCT_EDITED, product_id=product_id))
 
     assert response.ticket_id == existing.id
     assert len(repo.updated) == 1
@@ -80,7 +80,7 @@ async def test_edited_event_returns_404_when_no_active_ticket():
     repo = FakeTicketRepository()
     use_case = HandleB2BEventUseCase(ticket_repository=repo)
     with pytest.raises(TicketNotFoundForEditError):
-        await use_case(_make_event(B2BEventTypeEnum.EDITED))
+        await use_case(_make_event(B2BEventTypeEnum.PRODUCT_EDITED))
 
 
 @pytest.mark.anyio
@@ -96,7 +96,7 @@ async def test_deleted_event_closes_existing_tickets():
     repo.add(other)
 
     use_case = HandleB2BEventUseCase(ticket_repository=repo)
-    response = await use_case(_make_event(B2BEventTypeEnum.DELETED, product_id=product_id))
+    response = await use_case(_make_event(B2BEventTypeEnum.PRODUCT_DELETED, product_id=product_id))
 
     # Принимаем, ticket_id отсутствует (мы архивируем массово).
     assert response.ticket_id is None
@@ -112,7 +112,7 @@ async def test_deleted_event_idempotent_when_no_tickets_for_product():
     repo = FakeTicketRepository()
     use_case = HandleB2BEventUseCase(ticket_repository=repo)
 
-    response = await use_case(_make_event(B2BEventTypeEnum.DELETED))
+    response = await use_case(_make_event(B2BEventTypeEnum.PRODUCT_DELETED))
 
     assert response.ticket_id is None
     assert len(repo.archived_product_ids) == 1  # сам вызов archive_for_product был
@@ -129,7 +129,7 @@ async def test_created_event_does_not_touch_existing_archived_ticket():
     repo.add(archived)
 
     use_case = HandleB2BEventUseCase(ticket_repository=repo)
-    response = await use_case(_make_event(B2BEventTypeEnum.CREATED, product_id=product_id))
+    response = await use_case(_make_event(B2BEventTypeEnum.PRODUCT_CREATED, product_id=product_id))
 
     assert response.ticket_id is not None
     assert response.ticket_id != archived.id
