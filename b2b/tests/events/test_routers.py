@@ -1,4 +1,4 @@
-"""Тесты router'а apps.events.routers — POST /api/v1/events/moderation."""
+"""Тесты router'а apps.events.routers — POST /api/v1/moderation/events."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -88,7 +88,7 @@ def test_apply_moderation_endpoint_returns_204(stub: StubApplyModerationEventUse
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json=_moderated_payload(),
         headers={'X-Service-Key': settings.mod_to_b2b_key},
     )
@@ -103,7 +103,7 @@ def test_apply_moderation_blocked_event(stub: StubApplyModerationEventUseCase):
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json=_blocked_payload(hard_block=False),
         headers={'X-Service-Key': settings.mod_to_b2b_key},
     )
@@ -117,7 +117,7 @@ def test_apply_moderation_blocked_event(stub: StubApplyModerationEventUseCase):
 def test_apply_moderation_missing_service_key_returns_401(stub: StubApplyModerationEventUseCase):
     client = TestClient(_make_app(stub))
 
-    response = client.post('/api/v1/events/moderation', json=_moderated_payload())
+    response = client.post('/api/v1/moderation/events', json=_moderated_payload())
 
     assert response.status_code == 401
     assert response.json()['code'] == 'INVALID_SERVICE_KEY'
@@ -128,7 +128,7 @@ def test_apply_moderation_wrong_service_key_returns_401(stub: StubApplyModeratio
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json=_moderated_payload(),
         headers={'X-Service-Key': 'wrong-key'},
     )
@@ -142,7 +142,7 @@ def test_apply_moderation_invalid_body_returns_400(stub: StubApplyModerationEven
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json={},
         headers={'X-Service-Key': settings.mod_to_b2b_key},
     )
@@ -157,7 +157,7 @@ def test_apply_moderation_product_not_found_returns_404(stub: StubApplyModeratio
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json=_moderated_payload(),
         headers={'X-Service-Key': settings.mod_to_b2b_key},
     )
@@ -172,7 +172,7 @@ def test_apply_moderation_blocked_without_reason_returns_400(stub: StubApplyMode
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/moderation',
+        '/api/v1/moderation/events',
         json=_blocked_payload(),
         headers={'X-Service-Key': settings.mod_to_b2b_key},
     )

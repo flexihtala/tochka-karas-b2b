@@ -1,7 +1,9 @@
 """Входящие события от внешних сервисов.
 
-US-B2B-09: POST /api/v1/events/moderation — приём результата модерации
+US-B2B-09: POST /api/v1/moderation/events — приём результата модерации
 от Moderation-сервиса. Авторизация: X-Service-Key c direction `mod_to_b2b`.
+
+Путь соответствует neomarket-protocols/b2b/openapi.yaml.
 
 Идемпотентность обеспечивается на уровне use-case через
 shared.inbox.IdempotentHandler (см. apps/events/use_cases/apply_moderation_event.py).
@@ -20,7 +22,7 @@ from settings import settings
 from shared.inbox import make_verify_service_key
 from shared.types import ServiceKeyDirection
 
-router = APIRouter(prefix='/events')
+router = APIRouter(prefix='/moderation')
 
 
 verify_mod_to_b2b = make_verify_service_key(ServiceKeyDirection.MOD_TO_B2B, settings.mod_to_b2b_key)
@@ -34,7 +36,7 @@ error_responses = {
 
 
 @router.post(
-    '/moderation',
+    '/events',
     status_code=status.HTTP_204_NO_CONTENT,
     responses=error_responses,
     dependencies=[Depends(verify_mod_to_b2b)],
