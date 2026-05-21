@@ -4,7 +4,10 @@ from pydantic import BaseModel, Field
 
 
 class InventoryItemRequestSchema(BaseModel):
-    """Один элемент резервирования/снятия: sku + количество (> 0)."""
+    """Один элемент резервирования/снятия: sku + количество (> 0).
+
+    Соответствует InventoryItem в neomarket-protocols/b2b/openapi.yaml.
+    """
 
     sku_id: UUID
     quantity: int = Field(ge=1)
@@ -13,22 +16,26 @@ class InventoryItemRequestSchema(BaseModel):
 class ReserveRequestSchema(BaseModel):
     """Тело POST /api/v1/inventory/reserve.
 
+    Соответствует ReserveRequest в openapi.yaml: required [idempotency_key, order_id, items].
+
     `idempotency_key` обеспечивает at-most-once семантику: повтор запроса с тем же
     ключом не приводит к повторному списанию (см. apps/inbox/models.py
     UNIQUE(sender_service, idempotency_key)).
     """
 
     idempotency_key: UUID
+    order_id: UUID
     items: list[InventoryItemRequestSchema] = Field(min_length=1)
 
 
 class UnreserveRequestSchema(BaseModel):
     """Тело POST /api/v1/inventory/unreserve.
 
-    Идемпотентность реализована через `idempotency_key` (UUID). Канон допускает
-    также order_id-based идемпотентность; здесь используем единую модель ключа
-    через таблицу processed_events.
+    Соответствует InventoryOrderRequest в openapi.yaml: required [order_id, items].
+    Идемпотентность реализована по order_id (канон допускает; для transport-level
+    клиент может также передать заголовок Idempotency-Key, который маппится на
+    idempotency_key в processed_events).
     """
 
-    idempotency_key: UUID
+    order_id: UUID
     items: list[InventoryItemRequestSchema] = Field(min_length=1)
