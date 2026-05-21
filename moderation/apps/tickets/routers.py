@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from apps.auth.schemas import ErrorResponseSchema
 from apps.tickets.schemas import (
+    ApproveTicketRequestSchema,
     BlockTicketRequestSchema,
     TicketResponseSchema,
 )
@@ -53,9 +54,14 @@ async def approve_ticket(
     ticket_id: UUID,
     use_case: FromDishka[ApproveTicketUseCase],
     current_user: AuthenticatedUserSchema = Depends(get_current_user),
+    data: ApproveTicketRequestSchema | None = None,
 ) -> TicketResponseSchema:
-    """Одобрить тикет (IN_REVIEW → APPROVED). Outbox получит событие MODERATED для b2b."""
-    return await use_case(ticket_id, current_user.id, current_user.role)
+    """Одобрить тикет (IN_REVIEW → APPROVED). Outbox получит событие MODERATED для b2b.
+
+    По спеке принимает опциональное тело с полем comment (maxLength 2000).
+    """
+    comment = data.comment if data else None
+    return await use_case(ticket_id, current_user.id, current_user.role, comment=comment)
 
 
 @router.post(
@@ -70,5 +76,5 @@ async def block_ticket(
     use_case: FromDishka[BlockTicketUseCase],
     current_user: AuthenticatedUserSchema = Depends(get_current_user),
 ) -> TicketResponseSchema:
-    """Заблокировать товар. hard_block берётся из выбранной BlockingReason."""
+    """Заблокировать товар. hard_block берётся из выбранных BlockingReason."""
     return await use_case(ticket_id, data, current_user.id, current_user.role)

@@ -17,8 +17,8 @@ class BlockingReasonRepository(
         BlockingReasonUpdateSchema,
     ]
 ):
-    async def get_by_name(self, name: str) -> BlockingReasonReadSchema | None:
-        query = select(BlockingReason).where(BlockingReason.name == name)
+    async def get_by_code(self, code: str) -> BlockingReasonReadSchema | None:
+        query = select(BlockingReason).where(BlockingReason.code == code)
 
         async with self.session_manager.get_session() as session:
             model = (await session.execute(query)).scalar_one_or_none()
@@ -39,7 +39,7 @@ class BlockingReasonRepository(
         if is_active is not None:
             query = query.where(BlockingReason.is_active == is_active)
 
-        query = query.order_by(BlockingReason.name.asc())
+        query = query.order_by(BlockingReason.code.asc())
 
         async with self.session_manager.get_session() as session:
             result = await session.execute(query)

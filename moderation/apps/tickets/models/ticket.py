@@ -6,7 +6,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, T
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.tickets.enums import TicketStatus
+from apps.tickets.enums import TicketKind, TicketStatus
 from shared.db import Base, IDMixin, TimestampMixin
 
 
@@ -17,8 +17,8 @@ class Ticket(IDMixin, TimestampMixin, Base):
     queue/claim/release/approve/block; json_before/json_after доедут позже,
     но колонки уже зарезервированы.
 
-    Жизненный цикл: PENDING ←→ IN_REVIEW → (APPROVED | BLOCKED). DELETED-событие
-    от b2b переводит в ARCHIVED (deferred).
+    Жизненный цикл: PENDING ←→ IN_REVIEW → (APPROVED | BLOCKED | HARD_BLOCKED).
+    DELETED-событие от b2b переводит в ARCHIVED (deferred).
     """
 
     __tablename__ = 'tickets'
@@ -26,6 +26,13 @@ class Ticket(IDMixin, TimestampMixin, Base):
 
     product_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, unique=True, index=True)
     seller_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        default=TicketKind.CREATE.value,
+        server_default=TicketKind.CREATE.value,
+    )
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -41,6 +48,7 @@ class Ticket(IDMixin, TimestampMixin, Base):
         index=True,
     )
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -57,10 +65,13 @@ class Ticket(IDMixin, TimestampMixin, Base):
         id: uuid.UUID | None = None,
         product_id: uuid.UUID,
         seller_id: uuid.UUID,
+        category_id: uuid.UUID | None = None,
+        kind: TicketKind = TicketKind.CREATE,
         status: TicketStatus = TicketStatus.PENDING,
         queue_priority: int = 3,
         claimed_by: uuid.UUID | None = None,
         claimed_at: datetime | None = None,
+        claim_expires_at: datetime | None = None,
         decision_at: datetime | None = None,
         blocking_reason_id: uuid.UUID | None = None,
         moderator_comment: str | None = None,
@@ -71,10 +82,13 @@ class Ticket(IDMixin, TimestampMixin, Base):
             self.id = id
         self.product_id = product_id
         self.seller_id = seller_id
+        self.category_id = category_id
+        self.kind = kind.value if isinstance(kind, TicketKind) else kind
         self.status = status.value if isinstance(status, TicketStatus) else status
         self.queue_priority = queue_priority
         self.claimed_by = claimed_by
         self.claimed_at = claimed_at
+        self.claim_expires_at = claim_expires_at
         self.decision_at = decision_at
         self.blocking_reason_id = blocking_reason_id
         self.moderator_comment = moderator_comment

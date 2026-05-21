@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from apps.tickets.enums import TicketStatus
+from apps.tickets.enums import TicketKind, TicketStatus
 
 
 class TicketCreateSchema(BaseModel):
@@ -15,10 +15,13 @@ class TicketCreateSchema(BaseModel):
     id: UUID | None = None
     product_id: UUID
     seller_id: UUID
+    category_id: UUID | None = None
+    kind: TicketKind = TicketKind.CREATE
     status: TicketStatus = TicketStatus.PENDING
     queue_priority: int = 3
     claimed_by: UUID | None = None
     claimed_at: datetime | None = None
+    claim_expires_at: datetime | None = None
     decision_at: datetime | None = None
     blocking_reason_id: UUID | None = None
     moderator_comment: str | None = None
@@ -32,10 +35,13 @@ class TicketReadSchema(BaseModel):
     id: UUID
     product_id: UUID
     seller_id: UUID
+    category_id: UUID | None = None
+    kind: TicketKind = TicketKind.CREATE
     status: TicketStatus
     queue_priority: int
     claimed_by: UUID | None
     claimed_at: datetime | None
+    claim_expires_at: datetime | None = None
     decision_at: datetime | None
     blocking_reason_id: UUID | None
     moderator_comment: str | None
@@ -52,6 +58,7 @@ class TicketUpdateSchema(BaseModel):
     status: TicketStatus | None = None
     claimed_by: UUID | None = None
     claimed_at: datetime | None = None
+    claim_expires_at: datetime | None = None
     decision_at: datetime | None = None
     blocking_reason_id: UUID | None = None
     moderator_comment: str | None = None

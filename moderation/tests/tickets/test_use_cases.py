@@ -28,7 +28,7 @@ async def test_release_returns_pending_and_clears_claim():
     result = await use_case(ticket.id, moderator_id, UserRole.MODERATOR)
 
     assert result.status == TicketStatus.PENDING
-    assert result.claimed_by is None
+    assert result.assigned_moderator_id is None
     assert result.claimed_at is None
     assert repo.by_id[ticket.id].status == TicketStatus.PENDING
     assert repo.by_id[ticket.id].claimed_by is None
@@ -154,7 +154,7 @@ async def test_block_soft_emits_event_with_hard_block_false():
     outbox = FakeOutboxRepository()
     moderator_id = uuid4()
 
-    soft_reason = make_blocking_reason(name='Soft', hard_block=False)
+    soft_reason = make_blocking_reason(title='Soft', hard_block=False)
     reasons.add(soft_reason)
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
     repo.add(ticket)
@@ -169,10 +169,10 @@ async def test_block_soft_emits_event_with_hard_block_false():
     result = await use_case(
         ticket.id,
         BlockTicketRequestSchema(
-            blocking_reason_id=soft_reason.id,
-            moderator_comment='Описание не соответствует',
+            blocking_reason_ids=[soft_reason.id],
+            comment='Описание не соответствует',
             field_reports=[
-                FieldReportSchema(field_name='description', comment='Скопировано'),
+                FieldReportSchema(field_path='description', message='Скопировано'),
             ],
         ),
         moderator_id,
@@ -180,26 +180,30 @@ async def test_block_soft_emits_event_with_hard_block_false():
     )
 
     assert result.status == TicketStatus.BLOCKED
-    assert result.blocking_reason_id == soft_reason.id
-    # moderator_comment персистится в БД (read-schema), но не утекает в response (см. response.py).
+    # Спека TicketResponse не отдаёт blocking_reason_id напрямую — он живёт в DB
+    # и в outbox payload. Поверяем persisted state в репозитории.
+    assert repo.by_id[ticket.id].blocking_reason_id == soft_reason.id
+    # comment персистится в БД (read-schema), но не утекает в response (см. response.py).
     assert repo.by_id[ticket.id].moderator_comment == 'Описание не соответствует'
     assert len(outbox.enqueued) == 1
     event = outbox.enqueued[0]
     assert event.event_type == 'BLOCKED'
     assert event.payload['hard_block'] is False
-    assert event.payload['blocking_reason_id'] == str(soft_reason.id)
-    assert event.payload['moderator_comment'] == 'Описание не соответствует'
-    assert event.payload['field_reports'] == [{'field_name': 'description', 'sku_id': None, 'comment': 'Скопировано'}]
+    assert event.payload['blocking_reason_ids'] == [str(soft_reason.id)]
+    assert event.payload['comment'] == 'Описание не соответствует'
+    assert event.payload['field_reports'] == [
+        {'field_path': 'description', 'message': 'Скопировано', 'severity': 'ERROR'}
+    ]
 
 
 @pytest.mark.anyio
-async def test_block_hard_emits_event_with_hard_block_true():
+async def test_block_hard_emits_hard_blocked_event_and_status():
     repo = FakeTicketRepository()
     reasons = FakeBlockingReasonRepository()
     outbox = FakeOutboxRepository()
     moderator_id = uuid4()
 
-    hard_reason = make_blocking_reason(name='Forbidden', hard_block=True)
+    hard_reason = make_blocking_reason(title='Forbidden', hard_block=True)
     reasons.add(hard_reason)
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
     repo.add(ticket)
@@ -214,14 +218,16 @@ async def test_block_hard_emits_event_with_hard_block_true():
     result = await use_case(
         ticket.id,
         BlockTicketRequestSchema(
-            blocking_reason_id=hard_reason.id,
-            moderator_comment='Запрещённый товар',
+            blocking_reason_ids=[hard_reason.id],
+            comment='Запрещённый товар',
         ),
         moderator_id,
         UserRole.MODERATOR,
     )
 
-    assert result.status == TicketStatus.BLOCKED
+    # По спеке hard_block=true → терминальный статус HARD_BLOCKED.
+    assert result.status == TicketStatus.HARD_BLOCKED
+    assert outbox.enqueued[0].event_type == 'HARD_BLOCKED'
     assert outbox.enqueued[0].payload['hard_block'] is True
 
 
@@ -241,10 +247,7 @@ async def test_block_404_when_reason_not_found():
     with pytest.raises(BlockingReasonNotFoundError):
         await use_case(
             ticket.id,
-            BlockTicketRequestSchema(
-                blocking_reason_id=uuid4(),
-                moderator_comment='x',
-            ),
+            BlockTicketRequestSchema(blocking_reason_ids=[uuid4()], comment='x'),
             moderator_id,
             UserRole.MODERATOR,
         )
@@ -255,7 +258,7 @@ async def test_block_rejects_inactive_reason():
     repo = FakeTicketRepository()
     reasons = FakeBlockingReasonRepository()
     moderator_id = uuid4()
-    inactive_reason = make_blocking_reason(name='Old', is_active=False)
+    inactive_reason = make_blocking_reason(title='Old', is_active=False)
     reasons.add(inactive_reason)
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
     repo.add(ticket)
@@ -269,10 +272,7 @@ async def test_block_rejects_inactive_reason():
     with pytest.raises(BlockingReasonNotFoundError):
         await use_case(
             ticket.id,
-            BlockTicketRequestSchema(
-                blocking_reason_id=inactive_reason.id,
-                moderator_comment='x',
-            ),
+            BlockTicketRequestSchema(blocking_reason_ids=[inactive_reason.id], comment='x'),
             moderator_id,
             UserRole.MODERATOR,
         )
@@ -298,10 +298,40 @@ async def test_block_rejects_when_not_owner_and_not_admin():
     with pytest.raises(TicketNotAssignedError):
         await use_case(
             ticket.id,
-            BlockTicketRequestSchema(
-                blocking_reason_id=reason.id,
-                moderator_comment='x',
-            ),
+            BlockTicketRequestSchema(blocking_reason_ids=[reason.id], comment='x'),
             other_moderator,
             UserRole.MODERATOR,
         )
+
+
+@pytest.mark.anyio
+async def test_block_multiple_reasons_any_hard_makes_hard_blocked():
+    """blocking_reason_ids — массив; если хотя бы одна причина hard_block — HARD_BLOCKED."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+
+    soft = make_blocking_reason(title='Soft', hard_block=False)
+    hard = make_blocking_reason(title='Hard', hard_block=True)
+    reasons.add(soft)
+    reasons.add(hard)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+
+    use_case = BlockTicketUseCase(
+        ticket_repository=repo,
+        blocking_reason_repository=reasons,
+        outbox_repository=outbox,
+        session_manager=FakeSessionManager(),
+    )
+
+    result = await use_case(
+        ticket.id,
+        BlockTicketRequestSchema(blocking_reason_ids=[soft.id, hard.id]),
+        moderator_id,
+        UserRole.MODERATOR,
+    )
+
+    assert result.status == TicketStatus.HARD_BLOCKED
+    assert outbox.enqueued[0].payload['blocking_reason_ids'] == [str(soft.id), str(hard.id)]

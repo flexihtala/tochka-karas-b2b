@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from apps.tickets.enums import TicketStatus
+from apps.tickets.enums import TicketKind, TicketStatus
 from apps.tickets.schemas.db import TicketCreateSchema, TicketReadSchema, TicketUpdateSchema
 from shared.outbox import OutboxEnqueueSchema
 
@@ -12,10 +12,13 @@ def make_ticket(
     id: UUID | None = None,
     product_id: UUID | None = None,
     seller_id: UUID | None = None,
+    category_id: UUID | None = None,
+    kind: TicketKind = TicketKind.CREATE,
     status: TicketStatus = TicketStatus.PENDING,
     queue_priority: int = 3,
     claimed_by: UUID | None = None,
     claimed_at: datetime | None = None,
+    claim_expires_at: datetime | None = None,
     decision_at: datetime | None = None,
     blocking_reason_id: UUID | None = None,
     moderator_comment: str | None = None,
@@ -27,10 +30,13 @@ def make_ticket(
         id=id or uuid4(),
         product_id=product_id or uuid4(),
         seller_id=seller_id or uuid4(),
+        category_id=category_id,
+        kind=kind,
         status=status,
         queue_priority=queue_priority,
         claimed_by=claimed_by,
         claimed_at=claimed_at,
+        claim_expires_at=claim_expires_at,
         decision_at=decision_at,
         blocking_reason_id=blocking_reason_id,
         moderator_comment=moderator_comment,
@@ -64,10 +70,13 @@ class FakeTicketRepository:
             id=data.id or uuid4(),
             product_id=data.product_id,
             seller_id=data.seller_id,
+            category_id=data.category_id,
+            kind=data.kind,
             status=data.status,
             queue_priority=data.queue_priority,
             claimed_by=data.claimed_by,
             claimed_at=data.claimed_at,
+            claim_expires_at=data.claim_expires_at,
             decision_at=data.decision_at,
             blocking_reason_id=data.blocking_reason_id,
             moderator_comment=data.moderator_comment,
@@ -97,10 +106,19 @@ class FakeTicketRepository:
         limit: int,
         offset: int,
         status: TicketStatus | None = None,
+        queue_priority: int | None = None,
+        category_id: UUID | None = None,
+        seller_id: UUID | None = None,
     ) -> tuple[list[TicketReadSchema], int]:
         items = list(self.by_id.values())
         if status is not None:
             items = [t for t in items if t.status == status]
+        if queue_priority is not None:
+            items = [t for t in items if t.queue_priority == queue_priority]
+        if category_id is not None:
+            items = [t for t in items if getattr(t, 'category_id', None) == category_id]
+        if seller_id is not None:
+            items = [t for t in items if t.seller_id == seller_id]
         total_count = len(items)
         items.sort(key=lambda t: (t.queue_priority, t.created_at))
         return items[offset : offset + limit], total_count

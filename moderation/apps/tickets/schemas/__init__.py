@@ -8,6 +8,9 @@ from .db import (
     TicketUpdateSchema as TicketUpdateSchema,
 )
 from .request import (
+    ApproveTicketRequestSchema as ApproveTicketRequestSchema,
+)
+from .request import (
     BlockTicketRequestSchema as BlockTicketRequestSchema,
 )
 from .request import (

@@ -1,28 +1,42 @@
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class FieldReportSchema(BaseModel):
-    """FieldReport — детальное замечание по полю товара. M2 пробрасывает его в payload
-    события BLOCKED для B2B, чтобы продавец видел конкретику.
+class FieldReportSeverity(StrEnum):
+    INFO = 'INFO'
+    WARNING = 'WARNING'
+    ERROR = 'ERROR'
 
-    field_name — допустимые значения из канона:
-    title, description, product_images, category, sku_name, sku_image, sku_price.
+
+class FieldReportSchema(BaseModel):
+    """FieldReport по спеке `neomarket-moderation.yaml`:
+    field_path (обяз.), message (обяз.), severity (опц., default ERROR).
     """
 
-    field_name: str = Field(min_length=1, max_length=64)
-    sku_id: UUID | None = None
-    comment: str = Field(min_length=1, max_length=1000)
+    field_path: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=1000)
+    severity: FieldReportSeverity = FieldReportSeverity.ERROR
+
+
+class ApproveTicketRequestSchema(BaseModel):
+    """POST /api/v1/tickets/{id}/approve — опциональное тело по спеке.
+
+    Поле comment (maxLength 2000) — опциональный комментарий модератора при одобрении.
+    """
+
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class BlockTicketRequestSchema(BaseModel):
-    """POST /api/v1/tickets/{id}/block — тело запроса.
+    """POST /api/v1/tickets/{id}/block — тело запроса (BlockDecisionRequest по спеке).
 
-    hard_block выводится из выбранной причины (поле blocking_reason.hard_block), а не
-    из request body — модератор не может «переопределить» жёсткость через API.
+    blocking_reason_ids — массив (minItems: 1) UUID причин.
+    comment — опциональный комментарий модератора (maxLength 2000).
+    hard_block выводится из выбранной причины — не передаётся в теле.
     """
 
-    blocking_reason_id: UUID
-    moderator_comment: str = Field(min_length=1, max_length=2000)
+    blocking_reason_ids: list[UUID] = Field(min_length=1)
+    comment: str | None = Field(default=None, max_length=2000)
     field_reports: list[FieldReportSchema] | None = None

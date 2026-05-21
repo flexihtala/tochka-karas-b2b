@@ -21,7 +21,8 @@ def upgrade() -> None:
     op.create_table(
         'blocking_reasons',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-        sa.Column('name', sa.String(length=200), nullable=False),
+        sa.Column('code', sa.String(length=64), nullable=False),
+        sa.Column('title', sa.String(length=200), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('hard_block', sa.Boolean(), server_default='false', nullable=False),
         sa.Column('is_active', sa.Boolean(), server_default='true', nullable=False),
@@ -30,17 +31,20 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
     )
     op.create_index(op.f('ix_blocking_reasons_id'), 'blocking_reasons', ['id'], unique=False)
-    op.create_index(op.f('ix_blocking_reasons_name'), 'blocking_reasons', ['name'], unique=True)
+    op.create_index(op.f('ix_blocking_reasons_code'), 'blocking_reasons', ['code'], unique=True)
 
     op.create_table(
         'tickets',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('product_id', sa.Uuid(), nullable=False),
         sa.Column('seller_id', sa.Uuid(), nullable=False),
+        sa.Column('category_id', sa.Uuid(), nullable=True),
+        sa.Column('kind', sa.String(length=8), server_default='CREATE', nullable=False),
         sa.Column('status', sa.String(length=20), server_default='PENDING', nullable=False),
         sa.Column('queue_priority', sa.Integer(), server_default='3', nullable=False),
         sa.Column('claimed_by', sa.Uuid(), nullable=True),
         sa.Column('claimed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('claim_expires_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('decision_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('blocking_reason_id', sa.Uuid(), nullable=True),
         sa.Column('moderator_comment', sa.Text(), nullable=True),
@@ -56,6 +60,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_tickets_id'), 'tickets', ['id'], unique=False)
     op.create_index(op.f('ix_tickets_product_id'), 'tickets', ['product_id'], unique=True)
     op.create_index(op.f('ix_tickets_seller_id'), 'tickets', ['seller_id'], unique=False)
+    op.create_index(op.f('ix_tickets_category_id'), 'tickets', ['category_id'], unique=False)
     op.create_index(op.f('ix_tickets_status'), 'tickets', ['status'], unique=False)
     op.create_index(op.f('ix_tickets_claimed_by'), 'tickets', ['claimed_by'], unique=False)
     # Композитный индекс для запроса claim_next (status + queue_priority + created_at).
@@ -100,11 +105,12 @@ def downgrade() -> None:
     op.drop_index('ix_tickets_status_priority_created', table_name='tickets')
     op.drop_index(op.f('ix_tickets_claimed_by'), table_name='tickets')
     op.drop_index(op.f('ix_tickets_status'), table_name='tickets')
+    op.drop_index(op.f('ix_tickets_category_id'), table_name='tickets')
     op.drop_index(op.f('ix_tickets_seller_id'), table_name='tickets')
     op.drop_index(op.f('ix_tickets_product_id'), table_name='tickets')
     op.drop_index(op.f('ix_tickets_id'), table_name='tickets')
     op.drop_table('tickets')
 
-    op.drop_index(op.f('ix_blocking_reasons_name'), table_name='blocking_reasons')
+    op.drop_index(op.f('ix_blocking_reasons_code'), table_name='blocking_reasons')
     op.drop_index(op.f('ix_blocking_reasons_id'), table_name='blocking_reasons')
     op.drop_table('blocking_reasons')

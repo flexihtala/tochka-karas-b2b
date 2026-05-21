@@ -1,15 +1,13 @@
 from apps.blocking_reasons.repositories import BlockingReasonRepository
-from apps.blocking_reasons.schemas.response import (
-    BlockingReasonListResponseSchema,
-    BlockingReasonResponseSchema,
-)
+from apps.blocking_reasons.schemas.response import BlockingReasonResponseSchema
 
 
 class ListBlockingReasonsUseCase:
     """GET /api/v1/blocking-reasons — moderator + admin доступ.
 
     Используется и admin-UI (для редактирования), и модераторами при выборе
-    причины блокировки. Спека позволяет фильтры по hard_block и is_active.
+    причины блокировки. По спеке возвращается массив (без пагинации/обёртки).
+    Поддерживаются фильтры hard_block и is_active.
     """
 
     def __init__(self, blocking_reason_repository: BlockingReasonRepository):
@@ -20,8 +18,6 @@ class ListBlockingReasonsUseCase:
         *,
         hard_block: bool | None = None,
         is_active: bool | None = None,
-    ) -> BlockingReasonListResponseSchema:
+    ) -> list[BlockingReasonResponseSchema]:
         items = await self.blocking_reason_repository.list_(hard_block=hard_block, is_active=is_active)
-        return BlockingReasonListResponseSchema(
-            items=[BlockingReasonResponseSchema.model_validate(i) for i in items],
-        )
+        return [BlockingReasonResponseSchema.model_validate(i) for i in items]

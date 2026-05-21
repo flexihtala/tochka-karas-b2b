@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.blocking_reasons.schemas import (
     BlockingReasonCreateRequestSchema,
-    BlockingReasonListResponseSchema,
     BlockingReasonResponseSchema,
     BlockingReasonUpdateRequestSchema,
 )
@@ -33,7 +32,7 @@ error_responses = {
 
 @router.get(
     '',
-    response_model=BlockingReasonListResponseSchema,
+    response_model=list[BlockingReasonResponseSchema],
     responses=error_responses,
 )
 @inject
@@ -42,8 +41,11 @@ async def list_blocking_reasons(
     current_user: AuthenticatedUserSchema = Depends(get_current_user),
     hard_block: bool | None = Query(default=None),
     is_active: bool | None = Query(default=None),
-) -> BlockingReasonListResponseSchema:
-    """Список причин блокировки — доступен любому аутентифицированному модератору/админу."""
+) -> list[BlockingReasonResponseSchema]:
+    """Список причин блокировки — массив прямо в response (по спеке).
+
+    Доступен любому аутентифицированному модератору/админу.
+    """
     _ = current_user
     return await use_case(hard_block=hard_block, is_active=is_active)
 

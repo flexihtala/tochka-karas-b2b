@@ -14,10 +14,7 @@ from apps.blocking_reasons.schemas.request import (
     BlockingReasonCreateRequestSchema,
     BlockingReasonUpdateRequestSchema,
 )
-from apps.blocking_reasons.schemas.response import (
-    BlockingReasonListResponseSchema,
-    BlockingReasonResponseSchema,
-)
+from apps.blocking_reasons.schemas.response import BlockingReasonResponseSchema
 from apps.blocking_reasons.use_cases import (
     CreateBlockingReasonUseCase,
     DeleteBlockingReasonUseCase,
@@ -28,10 +25,15 @@ from apps.errors import setup_error_handlers
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
-def _make_response(name: str = 'Test', hard_block: bool = False) -> BlockingReasonResponseSchema:
+def _make_response(
+    code: str = 'TEST_CODE',
+    title: str = 'Test',
+    hard_block: bool = False,
+) -> BlockingReasonResponseSchema:
     return BlockingReasonResponseSchema(
         id=uuid4(),
-        name=name,
+        code=code,
+        title=title,
         description='desc',
         hard_block=hard_block,
         is_active=True,
@@ -41,7 +43,7 @@ def _make_response(name: str = 'Test', hard_block: bool = False) -> BlockingReas
 class StubListUseCase:
     def __init__(self):
         self.calls: list[tuple[bool | None, bool | None]] = []
-        self.response = BlockingReasonListResponseSchema(items=[_make_response(name='A')])
+        self.response: list[BlockingReasonResponseSchema] = [_make_response(code='A_REASON')]
 
     async def __call__(self, *, hard_block: bool | None = None, is_active: bool | None = None):
         self.calls.append((hard_block, is_active))
@@ -147,7 +149,10 @@ def test_list_blocking_reasons_for_authenticated_returns_200(stubs):
     response = client.get('/api/v1/blocking-reasons?hard_block=true&is_active=true')
 
     assert response.status_code == 200
-    assert len(response.json()['items']) == 1
+    # По спеке — массив прямо в response (не {items: [...]}).
+    body = response.json()
+    assert isinstance(body, list)
+    assert len(body) == 1
     assert stubs.list_.calls == [(True, True)]
 
 
@@ -163,7 +168,10 @@ def test_create_blocking_reason_requires_admin(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.MODERATOR)
     client = TestClient(_make_app(stubs, user))
 
-    response = client.post('/api/v1/blocking-reasons', json={'name': 'X', 'hard_block': False})
+    response = client.post(
+        '/api/v1/blocking-reasons',
+        json={'code': 'X_REASON', 'title': 'X', 'hard_block': False},
+    )
 
     assert response.status_code == 403
     assert stubs.create.calls == []
@@ -175,11 +183,17 @@ def test_create_blocking_reason_returns_201_for_admin(stubs):
 
     response = client.post(
         '/api/v1/blocking-reasons',
-        json={'name': 'Запрещённые товары', 'description': 'desc', 'hard_block': True},
+        json={
+            'code': 'FORBIDDEN_GOODS',
+            'title': 'Запрещённые товары',
+            'description': 'desc',
+            'hard_block': True,
+        },
     )
 
     assert response.status_code == 201
-    assert stubs.create.calls[0].name == 'Запрещённые товары'
+    assert stubs.create.calls[0].code == 'FORBIDDEN_GOODS'
+    assert stubs.create.calls[0].title == 'Запрещённые товары'
     assert stubs.create.calls[0].hard_block is True
 
 

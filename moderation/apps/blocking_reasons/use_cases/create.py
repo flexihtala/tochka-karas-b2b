@@ -8,19 +8,20 @@ from apps.blocking_reasons.schemas.response import BlockingReasonResponseSchema
 class CreateBlockingReasonUseCase:
     """POST /api/v1/blocking-reasons — admin-only.
 
-    name должно быть уникальным; при коллизии — 409.
+    code должно быть уникальным; при коллизии — 409.
     """
 
     def __init__(self, blocking_reason_repository: BlockingReasonRepository):
         self.blocking_reason_repository = blocking_reason_repository
 
     async def __call__(self, data: BlockingReasonCreateRequestSchema) -> BlockingReasonResponseSchema:
-        if await self.blocking_reason_repository.get_by_name(data.name):
+        if await self.blocking_reason_repository.get_by_code(data.code):
             raise BlockingReasonAlreadyExistsError()
 
         reason = await self.blocking_reason_repository.create(
             BlockingReasonCreateSchema(
-                name=data.name,
+                code=data.code,
+                title=data.title,
                 description=data.description,
                 hard_block=data.hard_block,
             )

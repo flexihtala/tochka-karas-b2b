@@ -36,6 +36,7 @@ class ApproveTicketUseCase:
         ticket_id: UUID,
         moderator_id: UUID,
         role: UserRole,
+        comment: str | None = None,
     ) -> TicketResponseSchema:
         ticket = await self.ticket_repository.get_or_none(ticket_id)
         if ticket is None:
@@ -51,16 +52,26 @@ class ApproveTicketUseCase:
         now = datetime.now(UTC)
 
         async with self.session_manager.get_session() as session:
+            update_payload = {
+                'id': ticket_id,
+                'status': TicketStatus.APPROVED,
+                'decision_at': now,
+            }
+            if comment is not None:
+                update_payload['moderator_comment'] = comment
             updated = await self.ticket_repository.update_in_session(
                 session,
-                TicketUpdateSchema(
-                    id=ticket_id,
-                    status=TicketStatus.APPROVED,
-                    decision_at=now,
-                ),
+                TicketUpdateSchema(**update_payload),
             )
             if updated is None:
                 raise TicketNotFoundError()
+
+            payload: dict[str, object] = {
+                'product_id': str(updated.product_id),
+                'idempotency_key': str(idempotency_key),
+            }
+            if comment is not None:
+                payload['comment'] = comment
 
             await self.outbox_repository.enqueue(
                 session,
@@ -68,10 +79,7 @@ class ApproveTicketUseCase:
                     idempotency_key=idempotency_key,
                     event_type='MODERATED',
                     target_service=ServiceName.B2B,
-                    payload={
-                        'product_id': str(updated.product_id),
-                        'idempotency_key': str(idempotency_key),
-                    },
+                    payload=payload,
                 ),
             )
 

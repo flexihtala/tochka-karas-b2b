@@ -10,7 +10,8 @@ class BlockingReasonCreateSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID | None = None
-    name: str
+    code: str
+    title: str
     description: str | None = None
     hard_block: bool = False
     is_active: bool = True
@@ -20,7 +21,8 @@ class BlockingReasonReadSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    name: str
+    code: str
+    title: str
     description: str | None
     hard_block: bool
     is_active: bool
@@ -32,7 +34,6 @@ class BlockingReasonUpdateSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    name: str | None = None
+    title: str | None = None
     description: str | None = None
-    hard_block: bool | None = None
     is_active: bool | None = None

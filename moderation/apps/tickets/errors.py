@@ -22,11 +22,3 @@ class TicketNotAssignedError(TicketError):
 
     def __init__(self, message: str = 'Тикет назначен другому модератору'):
         super().__init__('TICKET_NOT_ASSIGNED', message, 409)
-
-
-class QueueEmptyError(TicketError):
-    """404 при пустой очереди (спека возвращает 204, но мы маппим через стандартный AppError-механизм
-    в 404 с понятным кодом; роутер при необходимости переопределит на 204.)."""
-
-    def __init__(self, message: str = 'Очередь пуста'):
-        super().__init__('QUEUE_EMPTY', message, 404)

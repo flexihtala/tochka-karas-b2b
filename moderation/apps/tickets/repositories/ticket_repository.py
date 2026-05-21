@@ -19,6 +19,9 @@ class TicketRepository(
         limit: int,
         offset: int,
         status: TicketStatus | None = None,
+        queue_priority: int | None = None,
+        category_id: UUID | None = None,
+        seller_id: UUID | None = None,
     ) -> tuple[list[TicketReadSchema], int]:
         query = select(Ticket)
         count_query = select(func.count()).select_from(Ticket)
@@ -26,6 +29,15 @@ class TicketRepository(
         if status is not None:
             query = query.where(Ticket.status == status.value)
             count_query = count_query.where(Ticket.status == status.value)
+        if queue_priority is not None:
+            query = query.where(Ticket.queue_priority == queue_priority)
+            count_query = count_query.where(Ticket.queue_priority == queue_priority)
+        if category_id is not None and hasattr(Ticket, 'category_id'):
+            query = query.where(Ticket.category_id == category_id)
+            count_query = count_query.where(Ticket.category_id == category_id)
+        if seller_id is not None:
+            query = query.where(Ticket.seller_id == seller_id)
+            count_query = count_query.where(Ticket.seller_id == seller_id)
 
         query = query.order_by(Ticket.queue_priority.asc(), Ticket.created_at.asc()).limit(limit).offset(offset)
 

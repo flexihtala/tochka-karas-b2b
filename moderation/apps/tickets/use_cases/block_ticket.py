@@ -19,10 +19,12 @@ from shared.types import ServiceName
 class BlockTicketUseCase:
     """POST /api/v1/tickets/{id}/block — заблокировать товар (soft или hard).
 
-    hard_block выводится из выбранной причины (blocking_reason.hard_block), а не
-    из тела запроса — модератор не может сам решать «жёсткость». Если у причины
-    hard_block=true → событие BLOCKED с hard_block=true → b2b держит товар
-    в терминальном статусе.
+    Тело запроса (BlockDecisionRequest по спеке): blocking_reason_ids (array, minItems=1),
+    comment (опц.), field_reports (опц.).
+
+    hard_block выводится из выбранных причин: если ХОТЯ БЫ ОДНА причина hard_block=true,
+    результирующий статус — HARD_BLOCKED (терминальный, продавец не может исправить).
+    Иначе — BLOCKED (продавец может отредактировать и пройти модерацию заново).
     """
 
     def __init__(
@@ -54,23 +56,30 @@ class BlockTicketUseCase:
         if role != UserRole.ADMIN and ticket.claimed_by != moderator_id:
             raise TicketNotAssignedError()
 
-        reason = await self.blocking_reason_repository.get_or_none(data.blocking_reason_id)
-        if reason is None or not reason.is_active:
-            raise BlockingReasonNotFoundError()
+        # Резолвим все причины (валидация всех ID, не только первого).
+        reasons = []
+        for reason_id in data.blocking_reason_ids:
+            reason = await self.blocking_reason_repository.get_or_none(reason_id)
+            if reason is None or not reason.is_active:
+                raise BlockingReasonNotFoundError()
+            reasons.append(reason)
 
+        hard_block = any(r.hard_block for r in reasons)
+        result_status = TicketStatus.HARD_BLOCKED if hard_block else TicketStatus.BLOCKED
         idempotency_key = uuid4()
         now = datetime.now(UTC)
-        hard_block = reason.hard_block
+        # Модель пока хранит одну FK — кладём первую причину; полный список идёт в outbox payload.
+        primary_reason_id = data.blocking_reason_ids[0]
 
         async with self.session_manager.get_session() as session:
             updated = await self.ticket_repository.update_in_session(
                 session,
                 TicketUpdateSchema(
                     id=ticket_id,
-                    status=TicketStatus.BLOCKED,
+                    status=result_status,
                     decision_at=now,
-                    blocking_reason_id=data.blocking_reason_id,
-                    moderator_comment=data.moderator_comment,
+                    blocking_reason_id=primary_reason_id,
+                    moderator_comment=data.comment,
                 ),
             )
             if updated is None:
@@ -78,8 +87,8 @@ class BlockTicketUseCase:
 
             payload: dict[str, object] = {
                 'product_id': str(updated.product_id),
-                'blocking_reason_id': str(data.blocking_reason_id),
-                'moderator_comment': data.moderator_comment,
+                'blocking_reason_ids': [str(rid) for rid in data.blocking_reason_ids],
+                'comment': data.comment,
                 'hard_block': hard_block,
                 'idempotency_key': str(idempotency_key),
             }
@@ -90,7 +99,7 @@ class BlockTicketUseCase:
                 session,
                 OutboxEnqueueSchema(
                     idempotency_key=idempotency_key,
-                    event_type='BLOCKED',
+                    event_type='HARD_BLOCKED' if hard_block else 'BLOCKED',
                     target_service=ServiceName.B2B,
                     payload=payload,
                 ),

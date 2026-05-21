@@ -14,8 +14,5 @@ from .request import (
     BlockingReasonUpdateRequestSchema as BlockingReasonUpdateRequestSchema,
 )
 from .response import (
-    BlockingReasonListResponseSchema as BlockingReasonListResponseSchema,
-)
-from .response import (
     BlockingReasonResponseSchema as BlockingReasonResponseSchema,
 )
