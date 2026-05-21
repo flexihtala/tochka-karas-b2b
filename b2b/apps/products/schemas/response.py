@@ -53,24 +53,32 @@ class ProductResponseSchema(BaseModel):
 class ProductListItemResponseSchema(BaseModel):
     """Краткое представление товара в списке seller cabinet (B2B-11).
 
-    Отличается от ProductResponseSchema:
-    - нет description/characteristics/skus (только агрегаты skus_count и total_active_quantity);
-    - images приходят как минимальный набор для превью карточки.
+    Соответствует ProductShortResponse в neomarket-protocols/b2b/openapi.yaml:
+    required [id, title, slug, status, category_id, deleted, created_at];
+    optional min_price (nullable), cover_image (nullable).
+
+    Расширения (не входят в spec, дополнительные данные для UI кабинета продавца):
+    - seller_id, images[], skus_count, total_active_quantity, updated_at.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
+    # Поля по спецификации
     id: UUID
-    seller_id: UUID
-    category_id: UUID
     title: str
     slug: str
     status: ProductStatus
+    category_id: UUID
     deleted: bool
+    created_at: datetime
+    min_price: int | None = Field(default=None, description='Минимальная цена SKU в копейках')
+    cover_image: str | None = Field(default=None)
+
+    # Расширения для seller UI
+    seller_id: UUID
     images: list[ProductImageResponseSchema] = Field(default_factory=list)
     skus_count: int = 0
     total_active_quantity: int = 0
-    created_at: datetime
     updated_at: datetime
 
 
