@@ -17,7 +17,7 @@ class SKUCreateRequestSchema(BaseModel):
     product_id: UUID
     name: str = Field(min_length=1, max_length=255)
     price: int = Field(ge=0)
-    cost_price: int = Field(ge=0)
+    cost_price: int | None = Field(default=None, ge=0)
     discount: int = Field(default=0, ge=0)
     stock_quantity: int = Field(default=0, ge=0)
     article: str | None = Field(default=None, max_length=255)

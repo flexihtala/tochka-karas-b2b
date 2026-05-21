@@ -221,6 +221,7 @@ class EditSKUUseCase:
             article=sku.article,
             active_quantity=sku.active_quantity,
             reserved_quantity=sku.reserved_quantity,
+            stock_quantity=sku.stock_quantity,
             images=[SKUImageResponseSchema(id=i.id, url=i.url, ordering=i.ordering) for i in images],
             characteristics=[
                 SKUCharacteristicResponseSchema(id=c.id, name=c.name, value=c.value) for c in characteristics

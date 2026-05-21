@@ -128,6 +128,30 @@ class FakeProductRepository:
         self.by_id[data.id] = merged
         return merged
 
+    async def list_by_seller(self, seller_id: UUID, *, include_deleted: bool = False) -> list[ProductReadSchema]:
+        rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
+        if not include_deleted:
+            rows = [p for p in rows if not p.deleted]
+        return rows
+
+
+class FakeSKURepositoryForDelete:
+    """Минималистичный SKU-фейк для тестов удаления товара.
+
+    Поддерживает только `list_ids_by_product` — единственный вызов из DeleteProductUseCase.
+    """
+
+    def __init__(self):
+        self.ids_by_product: dict[UUID, list[UUID]] = {}
+
+    def add_sku(self, product_id: UUID, sku_id: UUID | None = None) -> UUID:
+        new_id = sku_id or uuid4()
+        self.ids_by_product.setdefault(product_id, []).append(new_id)
+        return new_id
+
+    async def list_ids_by_product(self, product_id: UUID) -> list[UUID]:
+        return list(self.ids_by_product.get(product_id, []))
+
 
 class FakeProductImageRepository:
     def __init__(self):

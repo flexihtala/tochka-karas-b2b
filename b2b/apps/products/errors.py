@@ -37,6 +37,12 @@ class ProductNotOwnerError(ProductForbiddenError):
 
 
 class ProductHardBlockedError(ProductForbiddenError):
-    def __init__(self, message: str = 'Cannot edit hard-blocked product'):
+    def __init__(self, message: str = 'Product is hard-blocked'):
         super().__init__(message)
         self.code = 'HARD_BLOCKED'
+
+
+class ProductAlreadyDeletedError(ProductInvalidRequestError):
+    def __init__(self, message: str = 'Product already deleted'):
+        super().__init__(message)
+        self.code = 'ALREADY_DELETED'

@@ -6,7 +6,11 @@ from apps.products.repositories import (
     ProductImageRepository,
     ProductRepository,
 )
-from apps.products.use_cases import CreateProductUseCase, EditProductUseCase
+from apps.products.use_cases import (
+    CreateProductUseCase,
+    DeleteProductUseCase,
+    EditProductUseCase,
+)
 
 
 class ProductsProvider(Provider):
@@ -16,4 +20,5 @@ class ProductsProvider(Provider):
     category_repository = provide(CategoryRepository, scope=Scope.REQUEST)
 
     create_product_use_case = provide(CreateProductUseCase, scope=Scope.REQUEST)
+    delete_product_use_case = provide(DeleteProductUseCase, scope=Scope.REQUEST)
     edit_product_use_case = provide(EditProductUseCase, scope=Scope.REQUEST)

@@ -12,6 +12,7 @@ from apps.products.enums import ProductStatus
 from apps.products.errors import (
     CategoryNotFoundError,
     ImagesRequiredError,
+    ProductAlreadyDeletedError,
     ProductHardBlockedError,
     ProductNotFoundError,
     ProductNotOwnerError,
@@ -23,7 +24,7 @@ from apps.products.schemas.response import (
     ProductImageResponseSchema,
     ProductResponseSchema,
 )
-from apps.products.use_cases import CreateProductUseCase, EditProductUseCase
+from apps.products.use_cases import CreateProductUseCase, DeleteProductUseCase, EditProductUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
@@ -87,15 +88,28 @@ class StubEditProductUseCase:
         return self.response
 
 
+class StubDeleteProductUseCase:
+    def __init__(self):
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.error: Exception | None = None
+
+    async def __call__(self, product_id: UUID, current_user: AuthenticatedUserSchema) -> None:
+        self.calls.append((product_id, current_user))
+        if self.error:
+            raise self.error
+
+
 class ProductsRouteProvider(Provider):
     def __init__(
         self,
         create_stub: StubCreateProductUseCase,
         edit_stub: StubEditProductUseCase,
+        delete_stub: StubDeleteProductUseCase,
     ):
         super().__init__()
         self.create_stub = create_stub
         self.edit_stub = edit_stub
+        self.delete_stub = delete_stub
 
     @provide(scope=Scope.REQUEST)
     def get_create_product_use_case(self) -> CreateProductUseCase:
@@ -104,6 +118,10 @@ class ProductsRouteProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def get_edit_product_use_case(self) -> EditProductUseCase:
         return self.edit_stub
+
+    @provide(scope=Scope.REQUEST)
+    def get_delete_product_use_case(self) -> DeleteProductUseCase:
+        return self.delete_stub
 
 
 class AuthInjectingMiddleware:
@@ -123,9 +141,10 @@ class AuthInjectingMiddleware:
 
 
 def _make_app(
-    stub: StubCreateProductUseCase,
+    create_stub: StubCreateProductUseCase,
     user: AuthenticatedUserSchema | None,
     edit_stub: StubEditProductUseCase | None = None,
+    delete_stub: StubDeleteProductUseCase | None = None,
 ) -> FastAPI:
     """Создаёт минимальное FastAPI приложение с роутером products.
 
@@ -144,7 +163,11 @@ def _make_app(
     setup_error_handlers(app)
     container = make_async_container(
         FastapiProvider(),
-        ProductsRouteProvider(stub, edit_stub or StubEditProductUseCase()),
+        ProductsRouteProvider(
+            create_stub,
+            edit_stub or StubEditProductUseCase(),
+            delete_stub or StubDeleteProductUseCase(),
+        ),
     )
     setup_dishka(container, app)
     return app
@@ -166,6 +189,16 @@ def _create_request_payload(category_id: UUID | None = None) -> dict:
 @pytest.fixture
 def stub() -> StubCreateProductUseCase:
     return StubCreateProductUseCase()
+
+
+@pytest.fixture
+def edit_stub() -> StubEditProductUseCase:
+    return StubEditProductUseCase()
+
+
+@pytest.fixture
+def delete_stub() -> StubDeleteProductUseCase:
+    return StubDeleteProductUseCase()
 
 
 def test_create_product_endpoint_returns_201(stub: StubCreateProductUseCase):
@@ -245,13 +278,8 @@ def test_create_product_missing_images_returns_400(stub: StubCreateProductUseCas
 
 
 # ===========================================================================
-# PUT /api/v1/products/{product_id} — US-B2B-03
+# PATCH /api/v1/products/{product_id} — US-B2B-03
 # ===========================================================================
-
-
-@pytest.fixture
-def edit_stub() -> StubEditProductUseCase:
-    return StubEditProductUseCase()
 
 
 def _edit_request_payload(category_id: UUID | None = None) -> dict:
@@ -372,3 +400,130 @@ def test_edit_product_partial_body_accepted(stub: StubCreateProductUseCase, edit
 
     assert response.status_code == 200
     assert len(edit_stub.calls) == 1
+
+
+# ===========================================================================
+# DELETE /api/v1/products/{product_id} — US-B2B-04
+# ===========================================================================
+
+
+def test_delete_product_endpoint_returns_204(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+    product_id = uuid4()
+
+    response = client.delete(f'/api/v1/products/{product_id}')
+
+    assert response.status_code == 204
+    assert response.content == b''
+    assert len(delete_stub.calls) == 1
+    called_id, called_user = delete_stub.calls[0]
+    assert called_id == product_id
+    assert called_user.id == user.id
+
+
+def test_delete_product_unauthorized_returns_401(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    client = TestClient(_make_app(stub, user=None, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 401
+    assert response.json() == {'code': 'UNAUTHORIZED', 'message': 'Unauthorized'}
+    assert delete_stub.calls == []
+
+
+def test_delete_product_non_seller_returns_403(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 403
+    assert response.json()['code'] == 'FORBIDDEN'
+    assert delete_stub.calls == []
+
+
+def test_delete_product_not_owner_returns_403(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    delete_stub.error = ProductNotOwnerError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body['code'] == 'NOT_OWNER'
+
+
+def test_delete_product_hard_blocked_returns_403(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    delete_stub.error = ProductHardBlockedError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body['code'] == 'HARD_BLOCKED'
+
+
+def test_delete_product_already_deleted_returns_400(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    delete_stub.error = ProductAlreadyDeletedError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body['code'] == 'ALREADY_DELETED'
+    assert body['message'] == 'Product already deleted'
+
+
+def test_delete_product_not_found_returns_404(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    delete_stub.error = ProductNotFoundError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body['code'] == 'NOT_FOUND'
+
+
+def test_delete_product_invalid_uuid_returns_422(
+    stub: StubCreateProductUseCase,
+    delete_stub: StubDeleteProductUseCase,
+):
+    """FastAPI валидация path-параметра возвращает 400 через наш RequestValidationError handler."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, delete_stub=delete_stub))
+
+    response = client.delete('/api/v1/products/not-a-uuid')
+
+    # validation_error_handler преобразует RequestValidationError в 400 INVALID_REQUEST
+    assert response.status_code == 400
+    body = response.json()
+    assert body['code'] == 'INVALID_REQUEST'
