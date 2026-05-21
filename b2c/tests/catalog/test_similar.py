@@ -226,14 +226,14 @@ def test_similar_router_returns_200():
     stub = StubGetSimilar()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{product_id}/similar')
+    response = client.get(f'/api/v1/catalog/products/{product_id}/similar')
 
     assert response.status_code == 200
     body = response.json()
-    assert body['items'] == []
-    assert body['total_count'] == 0
+    # Per openapi spec: flat array of CatalogProductCard
+    assert body == []
     assert stub.calls[0][0] == product_id
-    assert stub.calls[0][1] == 8  # default limit
+    assert stub.calls[0][1] == 10  # default limit per spec
 
 
 def test_similar_router_returns_404_for_unknown_product():
@@ -241,7 +241,7 @@ def test_similar_router_returns_404_for_unknown_product():
     stub.error = ProductNotFoundError()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{uuid4()}/similar')
+    response = client.get(f'/api/v1/catalog/products/{uuid4()}/similar')
 
     assert response.status_code == 404
     assert response.json()['code'] == 'NOT_FOUND'
@@ -252,7 +252,7 @@ def test_similar_router_passes_limit_query():
     stub = StubGetSimilar()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{product_id}/similar?limit=5')
+    response = client.get(f'/api/v1/catalog/products/{product_id}/similar?limit=5')
 
     assert response.status_code == 200
     assert stub.calls[0][1] == 5
@@ -262,9 +262,9 @@ def test_similar_router_rejects_invalid_limit():
     stub = StubGetSimilar()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{uuid4()}/similar?limit=50')
+    response = client.get(f'/api/v1/catalog/products/{uuid4()}/similar?limit=51')
 
-    # MAX_LIMIT в router = 20 → FastAPI/наш валидатор отдаст 400.
+    # MAX_LIMIT per openapi spec = 50 → FastAPI/наш валидатор отдаст 400.
     assert response.status_code == 400
 
 
@@ -273,6 +273,6 @@ def test_similar_router_502_on_b2b_unavailable():
     stub.error = CatalogUnavailableError()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{uuid4()}/similar')
+    response = client.get(f'/api/v1/catalog/products/{uuid4()}/similar')
 
     assert response.status_code == 502
