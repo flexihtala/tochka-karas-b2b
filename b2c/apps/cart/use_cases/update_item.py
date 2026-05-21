@@ -7,12 +7,13 @@ from apps.cart.schemas.request import CartItemUpdateRequestSchema
 
 
 class UpdateItemUseCase:
-    """PATCH /api/v1/cart/items/{id} — изменить quantity позиции.
+    """PATCH /api/v1/cart/items/{sku_id} — изменить quantity позиции.
 
-    Бизнес-правила:
-    - Позиция должна принадлежать корзине текущей идентичности, иначе 404
-      (enumeration-защита — не светим существование чужих item_id).
+    Бизнес-правила (per openapi spec):
+    - Path-параметр — sku_id (а не внутренний item_id); позиция уникальна
+      в корзине по (cart_id, sku_id).
     - quantity >= 1 (для удаления — DELETE).
+    - Если корзины/позиции нет — 404 (enumeration-защита).
     """
 
     def __init__(
@@ -25,34 +26,29 @@ class UpdateItemUseCase:
 
     async def __call__(
         self,
-        item_id: UUID,
+        sku_id: UUID,
         data: CartItemUpdateRequestSchema,
         *,
         user_id: UUID | None,
         session_id: str | None,
     ) -> CartItemReadSchema:
-        existing = await self.cart_item_repository.get_or_none(item_id)
+        cart = await self._get_owned_cart(user_id=user_id, session_id=session_id)
+        if cart is None:
+            raise CartItemNotFoundError()
+
+        existing = await self.cart_item_repository.get_by_cart_and_sku(cart.id, sku_id)
         if existing is None:
             raise CartItemNotFoundError()
 
-        if not await self._cart_belongs_to_identity(existing.cart_id, user_id=user_id, session_id=session_id):
-            raise CartItemNotFoundError()
-
-        updated = await self.cart_item_repository.update(CartItemUpdateSchema(id=item_id, quantity=data.quantity))
+        updated = await self.cart_item_repository.update(
+            CartItemUpdateSchema(id=existing.id, quantity=data.quantity)
+        )
         if updated is None:
             raise CartItemNotFoundError()
         return updated
 
-    async def _cart_belongs_to_identity(
-        self,
-        cart_id: UUID,
-        *,
-        user_id: UUID | None,
-        session_id: str | None,
-    ) -> bool:
+    async def _get_owned_cart(self, *, user_id: UUID | None, session_id: str | None):
         if user_id is not None:
-            cart = await self.cart_repository.get_by_user(user_id)
-        else:
-            assert session_id is not None
-            cart = await self.cart_repository.get_by_session(session_id)
-        return cart is not None and cart.id == cart_id
+            return await self.cart_repository.get_by_user(user_id)
+        assert session_id is not None
+        return await self.cart_repository.get_by_session(session_id)

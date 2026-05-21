@@ -288,17 +288,20 @@ def test_add_item_validation_error_for_zero_quantity(stubs):
     assert response.status_code == 400
 
 
-def test_patch_item_returns_200(stubs):
+def test_patch_item_returns_200_cart(stubs):
     add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(*stubs, user=user))
-    item_id = uuid4()
+    sku_id = uuid4()
 
-    response = client.patch(f'/api/v1/cart/items/{item_id}', json={'quantity': 5})
+    response = client.patch(f'/api/v1/cart/items/{sku_id}', json={'quantity': 5})
 
+    # Per openapi spec: PATCH returns the full updated cart, not a single item.
     assert response.status_code == 200
-    assert response.json()['quantity'] == 5
-    assert update_stub.calls[0][0] == item_id
+    body = response.json()
+    assert 'items' in body
+    # use-case вызван с sku_id из path
+    assert update_stub.calls[0][0] == sku_id
     assert update_stub.calls[0][1].quantity == 5
 
 
@@ -314,17 +317,19 @@ def test_patch_item_returns_404_when_not_owned(stubs):
     assert response.json()['code'] == 'NOT_FOUND'
 
 
-def test_delete_item_returns_204(stubs):
+def test_delete_item_returns_200_cart(stubs):
     add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(*stubs, user=user))
-    item_id = uuid4()
+    sku_id = uuid4()
 
-    response = client.delete(f'/api/v1/cart/items/{item_id}')
+    response = client.delete(f'/api/v1/cart/items/{sku_id}')
 
-    assert response.status_code == 204
-    assert response.text == ''
-    assert remove_stub.calls[0][0] == item_id
+    # Per openapi spec: DELETE returns the full updated cart (200), not 204.
+    assert response.status_code == 200
+    body = response.json()
+    assert 'items' in body
+    assert remove_stub.calls[0][0] == sku_id
 
 
 def test_delete_item_returns_404_for_foreign(stubs):

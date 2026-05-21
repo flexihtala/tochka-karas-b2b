@@ -123,16 +123,18 @@ async def test_update_item_changes_quantity():
     item_repo = FakeCartItemRepository()
     user_id = uuid4()
     cart = await cart_repo.create(_cart_create_schema(user_id=user_id))
-    item = await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=uuid4(), quantity=2))
+    sku_id = uuid4()
+    item = await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, quantity=2))
 
     use_case = UpdateItemUseCase(cart_repository=cart_repo, cart_item_repository=item_repo)
     result = await use_case(
-        item.id,
+        sku_id,  # spec: path is sku_id, not item.id
         CartItemUpdateRequestSchema(quantity=5),
         user_id=user_id,
         session_id=None,
     )
 
+    assert result.id == item.id
     assert result.quantity == 5
 
 
@@ -142,15 +144,16 @@ async def test_update_item_rejects_foreign_cart():
     item_repo = FakeCartItemRepository()
     foreign_user = uuid4()
     foreign_cart = await cart_repo.create(_cart_create_schema(user_id=foreign_user))
-    foreign_item = await item_repo.create(CartItemCreateSchema(cart_id=foreign_cart.id, sku_id=uuid4(), quantity=1))
+    foreign_sku = uuid4()
+    await item_repo.create(CartItemCreateSchema(cart_id=foreign_cart.id, sku_id=foreign_sku, quantity=1))
 
     use_case = UpdateItemUseCase(cart_repository=cart_repo, cart_item_repository=item_repo)
 
     with pytest.raises(CartItemNotFoundError):
         await use_case(
-            foreign_item.id,
+            foreign_sku,
             CartItemUpdateRequestSchema(quantity=5),
-            user_id=uuid4(),  # другой user
+            user_id=uuid4(),  # другой user — нет своей корзины с этим sku
             session_id=None,
         )
 
@@ -164,10 +167,11 @@ async def test_remove_item_deletes_owned_item():
     item_repo = FakeCartItemRepository()
     user_id = uuid4()
     cart = await cart_repo.create(_cart_create_schema(user_id=user_id))
-    item = await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=uuid4(), quantity=1))
+    sku_id = uuid4()
+    item = await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, quantity=1))
 
     use_case = RemoveItemUseCase(cart_repository=cart_repo, cart_item_repository=item_repo)
-    await use_case(item.id, user_id=user_id, session_id=None)
+    await use_case(sku_id, user_id=user_id, session_id=None)
 
     assert item.id not in item_repo.by_id
 
@@ -178,12 +182,15 @@ async def test_remove_item_rejects_foreign_cart():
     item_repo = FakeCartItemRepository()
     foreign_user = uuid4()
     foreign_cart = await cart_repo.create(_cart_create_schema(user_id=foreign_user))
-    foreign_item = await item_repo.create(CartItemCreateSchema(cart_id=foreign_cart.id, sku_id=uuid4(), quantity=1))
+    foreign_sku = uuid4()
+    foreign_item = await item_repo.create(
+        CartItemCreateSchema(cart_id=foreign_cart.id, sku_id=foreign_sku, quantity=1)
+    )
 
     use_case = RemoveItemUseCase(cart_repository=cart_repo, cart_item_repository=item_repo)
 
     with pytest.raises(CartItemNotFoundError):
-        await use_case(foreign_item.id, user_id=uuid4(), session_id=None)
+        await use_case(foreign_sku, user_id=uuid4(), session_id=None)
 
     assert foreign_item.id in item_repo.by_id
 

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, Request, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.cart.errors import GuestSessionRequiredError, MissingCartIdentityError
 from apps.cart.schemas.request import CartItemAddRequestSchema, CartItemUpdateRequestSchema
-from apps.cart.schemas.response import CartItemResponseSchema, CartResponseSchema
+from apps.cart.schemas.response import CartResponseSchema
 from apps.cart.use_cases import (
     AddItemUseCase,
     GetCartUseCase,
@@ -70,37 +70,41 @@ async def add_item(
     return await get_use_case(user_id=user_id, session_id=session_id)
 
 
-@router.patch('/items/{item_id}', response_model=CartItemResponseSchema, responses=error_responses)
+@router.patch('/items/{sku_id}', response_model=CartResponseSchema, responses=error_responses)
 @inject
 async def update_item(
     request: Request,
-    item_id: UUID,
+    sku_id: UUID,
     data: CartItemUpdateRequestSchema,
     use_case: FromDishka[UpdateItemUseCase],
+    get_use_case: FromDishka[GetCartUseCase],
     x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
-) -> CartItemResponseSchema:
+) -> CartResponseSchema:
+    """PATCH /api/v1/cart/items/{sku_id} — изменить quantity.
+
+    Per openapi spec: path-параметр sku_id, ответ — обновлённая корзина целиком.
+    """
     user_id, session_id = _identity(request, x_session_id)
-    item = await use_case(item_id, data, user_id=user_id, session_id=session_id)
-    return CartItemResponseSchema(
-        id=item.id,
-        sku_id=item.sku_id,
-        quantity=item.quantity,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-    )
+    await use_case(sku_id, data, user_id=user_id, session_id=session_id)
+    return await get_use_case(user_id=user_id, session_id=session_id)
 
 
-@router.delete('/items/{item_id}', status_code=status.HTTP_204_NO_CONTENT, responses=error_responses)
+@router.delete('/items/{sku_id}', response_model=CartResponseSchema, responses=error_responses)
 @inject
 async def delete_item(
     request: Request,
-    item_id: UUID,
+    sku_id: UUID,
     use_case: FromDishka[RemoveItemUseCase],
+    get_use_case: FromDishka[GetCartUseCase],
     x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
-) -> Response:
+) -> CartResponseSchema:
+    """DELETE /api/v1/cart/items/{sku_id} — удалить позицию.
+
+    Per openapi spec: path-параметр sku_id, ответ 200 с обновлённой корзиной.
+    """
     user_id, session_id = _identity(request, x_session_id)
-    await use_case(item_id, user_id=user_id, session_id=session_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    await use_case(sku_id, user_id=user_id, session_id=session_id)
+    return await get_use_case(user_id=user_id, session_id=session_id)
 
 
 @router.post('/merge', response_model=CartResponseSchema, responses=error_responses)
