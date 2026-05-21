@@ -107,30 +107,39 @@ def stubs():
     return (StubSubscribe(), StubUnsubscribe())
 
 
-def _create_payload(notify_on: list[str] | None = None, product_id: UUID | None = None) -> dict:
-    return {
-        'product_id': str(product_id or uuid4()),
-        'notify_on': notify_on if notify_on is not None else ['PRICE_DROP', 'BACK_IN_STOCK'],
-    }
-
-
-def test_subscribe_returns_201_with_notify_on(stubs):
+def test_subscribe_returns_204_with_default_events(stubs):
     subscribe_stub, unsubscribe_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    product_id = uuid4()
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    payload = _create_payload(notify_on=['PRICE_DROP', 'BACK_IN_STOCK'])
-    response = client.post('/api/v1/subscriptions', json=payload)
+    # Empty body → default events per spec
+    response = client.post(f'/api/v1/favorites/{product_id}/subscribe')
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body['user_id'] == str(user.id)
-    assert body['product_id'] == payload['product_id']
-    assert body['notify_on'] == ['PRICE_DROP', 'BACK_IN_STOCK']
-    # user_id берётся из JWT, а не из тела
-    assert subscribe_stub.calls[0][0].product_id == UUID(payload['product_id'])
-    assert subscribe_stub.calls[0][0].notify_on == ['PRICE_DROP', 'BACK_IN_STOCK']
-    assert subscribe_stub.calls[0][1].id == user.id
+    assert response.status_code == 204
+    assert response.text == ''
+    # use_case вызван с product_id из path и дефолтным набором событий
+    data, current_user = subscribe_stub.calls[0]
+    assert data.product_id == product_id
+    assert set(data.notify_on) == {'BACK_IN_STOCK', 'PRICE_DROP'}
+    assert current_user.id == user.id
+
+
+def test_subscribe_returns_204_with_explicit_events(stubs):
+    subscribe_stub, unsubscribe_stub = stubs
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    product_id = uuid4()
+    client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
+
+    response = client.post(
+        f'/api/v1/favorites/{product_id}/subscribe',
+        json={'events': ['PRICE_DROP']},
+    )
+
+    assert response.status_code == 204
+    data, current_user = subscribe_stub.calls[0]
+    assert data.notify_on == ['PRICE_DROP']
+    assert current_user.id == user.id
 
 
 def test_duplicate_subscription_returns_409(stubs):
@@ -139,7 +148,7 @@ def test_duplicate_subscription_returns_409(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    response = client.post('/api/v1/subscriptions', json=_create_payload())
+    response = client.post(f'/api/v1/favorites/{uuid4()}/subscribe')
 
     assert response.status_code == 409
     assert response.json() == {
@@ -148,14 +157,14 @@ def test_duplicate_subscription_returns_409(stubs):
     }
 
 
-def test_invalid_notify_on_returns_400(stubs):
+def test_invalid_events_returns_400(stubs):
     subscribe_stub, unsubscribe_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
     response = client.post(
-        '/api/v1/subscriptions',
-        json=_create_payload(notify_on=['NOT_A_REAL_EVENT']),
+        f'/api/v1/favorites/{uuid4()}/subscribe',
+        json={'events': ['NOT_A_REAL_EVENT']},
     )
 
     assert response.status_code == 400
@@ -174,7 +183,7 @@ def test_subscribe_to_unknown_product_returns_404(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    response = client.post('/api/v1/subscriptions', json=_create_payload())
+    response = client.post(f'/api/v1/favorites/{uuid4()}/subscribe')
 
     assert response.status_code == 404
     assert response.json() == {'code': 'PRODUCT_NOT_FOUND', 'message': 'Товар не найден'}
@@ -184,7 +193,7 @@ def test_subscribe_unauthorized_returns_401(stubs):
     subscribe_stub, unsubscribe_stub = stubs
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=None))
 
-    response = client.post('/api/v1/subscriptions', json=_create_payload())
+    response = client.post(f'/api/v1/favorites/{uuid4()}/subscribe')
 
     assert response.status_code == 401
 
@@ -194,7 +203,7 @@ def test_subscribe_non_buyer_returns_403(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    response = client.post('/api/v1/subscriptions', json=_create_payload())
+    response = client.post(f'/api/v1/favorites/{uuid4()}/subscribe')
 
     assert response.status_code == 403
 
@@ -205,7 +214,7 @@ def test_unsubscribe_returns_204(stubs):
     product_id = uuid4()
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    response = client.delete(f'/api/v1/subscriptions/{product_id}')
+    response = client.delete(f'/api/v1/favorites/{product_id}/subscribe')
 
     assert response.status_code == 204
     assert unsubscribe_stub.calls[0][0] == product_id
@@ -218,21 +227,10 @@ def test_unsubscribe_returns_404_when_no_subscription(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
-    response = client.delete(f'/api/v1/subscriptions/{uuid4()}')
+    response = client.delete(f'/api/v1/favorites/{uuid4()}/subscribe')
 
     assert response.status_code == 404
     assert response.json() == {
         'code': 'SUBSCRIPTION_NOT_FOUND',
         'message': 'Подписка не найдена',
     }
-
-
-def test_subscribe_rejects_empty_notify_on(stubs):
-    subscribe_stub, unsubscribe_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
-
-    response = client.post('/api/v1/subscriptions', json=_create_payload(notify_on=[]))
-
-    assert response.status_code == 400
-    assert subscribe_stub.calls == []
