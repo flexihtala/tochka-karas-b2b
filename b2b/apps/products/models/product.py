@@ -1,6 +1,8 @@
 import uuid
+from typing import Any
 
 from sqlalchemy import Boolean, ForeignKey, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.products.enums import ProductStatus
@@ -34,6 +36,7 @@ class Product(IDMixin, TimestampMixin, Base):
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
     blocking_reason_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     moderator_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    field_reports: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     images: Mapped[list['ProductImage']] = relationship(  # noqa: F821
         'ProductImage',
@@ -60,6 +63,7 @@ class Product(IDMixin, TimestampMixin, Base):
         deleted: bool = False,
         blocking_reason_id: uuid.UUID | None = None,
         moderator_comment: str | None = None,
+        field_reports: list[dict[str, Any]] | None = None,
     ):
         if id is not None:
             self.id = id
@@ -72,3 +76,4 @@ class Product(IDMixin, TimestampMixin, Base):
         self.deleted = deleted
         self.blocking_reason_id = blocking_reason_id
         self.moderator_comment = moderator_comment
+        self.field_reports = field_reports
