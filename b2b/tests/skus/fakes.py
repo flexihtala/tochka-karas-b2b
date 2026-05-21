@@ -42,6 +42,7 @@ class FakeSKURepository:
             article=data.article,
             active_quantity=data.active_quantity,
             reserved_quantity=data.reserved_quantity,
+            stock_quantity=data.active_quantity + data.reserved_quantity,
             created_at=now,
             updated_at=now,
         )
