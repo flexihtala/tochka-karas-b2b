@@ -17,9 +17,6 @@ from .response import (
     ReserveFailedItemSchema as ReserveFailedItemSchema,
 )
 from .response import (
-    ReserveItemResponseSchema as ReserveItemResponseSchema,
-)
-from .response import (
     ReserveResponseSchema as ReserveResponseSchema,
 )
 from .response import (

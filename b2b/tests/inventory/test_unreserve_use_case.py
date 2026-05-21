@@ -33,10 +33,10 @@ def make_use_case(
 
 def make_request(
     items: list[tuple[UUID, int]] | None = None,
-    idempotency_key: UUID | None = None,
+    order_id: UUID | None = None,
 ) -> UnreserveRequestSchema:
     return UnreserveRequestSchema(
-        idempotency_key=idempotency_key or uuid4(),
+        order_id=order_id or uuid4(),
         items=[InventoryItemRequestSchema(sku_id=sku_id, quantity=qty) for sku_id, qty in (items or [])],
     )
 
@@ -50,9 +50,13 @@ async def test_unreserve_restores_quantities():
     inventory.add_sku(sku_a, active=7, reserved=3)
     inventory.add_sku(sku_b, active=3, reserved=2)
 
-    response = await use_case(make_request([(sku_a, 3), (sku_b, 2)]))
+    order_id = uuid4()
+    response = await use_case(make_request([(sku_a, 3), (sku_b, 2)], order_id=order_id))
 
-    assert response.ok is True
+    # Ответ по спецификации: order_id, status='UNRESERVED', processed_at
+    assert response.order_id == order_id
+    assert response.status == 'UNRESERVED'
+    assert response.processed_at is not None
     # Состояние полностью восстановлено
     assert inventory.skus[sku_a] == {'active_quantity': 10, 'reserved_quantity': 0}
     assert inventory.skus[sku_b] == {'active_quantity': 5, 'reserved_quantity': 0}
@@ -60,19 +64,22 @@ async def test_unreserve_restores_quantities():
 
 @pytest.mark.anyio
 async def test_unreserve_idempotent_returns_cached():
-    """Повторный unreserve с тем же idempotency_key не повторяет операцию."""
+    """Повторный unreserve с тем же order_id не повторяет операцию."""
     use_case, inventory, inbox = make_use_case()
     sku_id = uuid4()
     inventory.add_sku(sku_id, active=7, reserved=3)
 
-    idem_key = uuid4()
-    first = await use_case(make_request([(sku_id, 3)], idempotency_key=idem_key))
-    assert first.ok is True
+    order_id = uuid4()
+    first = await use_case(make_request([(sku_id, 3)], order_id=order_id))
+    assert first.status == 'UNRESERVED'
+    assert first.order_id == order_id
     assert inventory.skus[sku_id] == {'active_quantity': 10, 'reserved_quantity': 0}
 
     # Повторяем — состояние НЕ должно измениться
-    second = await use_case(make_request([(sku_id, 3)], idempotency_key=idem_key))
-    assert second.ok is True
+    second = await use_case(make_request([(sku_id, 3)], order_id=order_id))
+    assert second.status == 'UNRESERVED'
+    assert second.order_id == order_id
+    assert second.processed_at == first.processed_at
     assert inventory.skus[sku_id] == {'active_quantity': 10, 'reserved_quantity': 0}
     # Реальный вызов unreserve был только один
     assert len(inventory.unreserve_calls) == 1
@@ -93,6 +100,6 @@ async def test_unreserve_missing_sku_ignored():
 
     response = await use_case(make_request([(existing, 3), (missing, 1)]))
 
-    assert response.ok is True
+    assert response.status == 'UNRESERVED'
     assert inventory.skus[existing] == {'active_quantity': 10, 'reserved_quantity': 0}
     assert missing not in inventory.skus

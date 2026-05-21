@@ -1,33 +1,27 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from apps.inventory.enums import ReserveFailureReason
-
-
-class ReserveItemResponseSchema(BaseModel):
-    """Состояние SKU после успешного резервирования."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    sku_id: UUID
-    reserved_quantity: int
-    remaining_stock: int
 
 
 class ReserveResponseSchema(BaseModel):
     """Успешный ответ POST /inventory/reserve (200).
 
-    Соответствует канону `b2b-flows.md#reserve-sku`.
+    Соответствует ReserveResponse в neomarket-protocols/b2b/openapi.yaml:
+    required [order_id, status, reserved_at], status='RESERVED'.
     """
 
-    reserved: bool = True
-    items: list[ReserveItemResponseSchema] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
+
+    order_id: UUID
+    status: str = 'RESERVED'
+    reserved_at: datetime
 
 
 class ReserveFailedItemSchema(BaseModel):
-    """Описание SKU, на котором сломалось all-or-nothing-резервирование."""
+    """Описание SKU, на котором сломалось all-or-nothing-резервирование (для 409 details)."""
 
     sku_id: UUID
     requested: int
@@ -36,9 +30,17 @@ class ReserveFailedItemSchema(BaseModel):
 
 
 class UnreserveResponseSchema(BaseModel):
-    """Ответ POST /inventory/unreserve. Канон: `{ok: true}`."""
+    """Ответ POST /inventory/unreserve.
 
-    ok: bool = True
+    Соответствует InventoryOrderResponse в openapi.yaml:
+    required [order_id, status, processed_at], status='UNRESERVED'.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    order_id: UUID
+    status: str = 'UNRESERVED'
+    processed_at: datetime
 
 
 class FulfillResponseSchema(BaseModel):

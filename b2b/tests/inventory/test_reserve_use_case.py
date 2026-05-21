@@ -49,9 +49,11 @@ def make_use_case(
 def make_request(
     items: list[tuple[UUID, int]] | None = None,
     idempotency_key: UUID | None = None,
+    order_id: UUID | None = None,
 ) -> ReserveRequestSchema:
     return ReserveRequestSchema(
         idempotency_key=idempotency_key or uuid4(),
+        order_id=order_id or uuid4(),
         items=[InventoryItemRequestSchema(sku_id=sku_id, quantity=qty) for sku_id, qty in (items or [])],
     )
 
@@ -64,19 +66,16 @@ async def test_reserve_all_skus_succeeds():
     inventory.add_sku(sku_a, active=10, reserved=0)
     inventory.add_sku(sku_b, active=5, reserved=1)
 
-    response = await use_case(make_request([(sku_a, 3), (sku_b, 2)]))
+    order_id = uuid4()
+    response = await use_case(make_request([(sku_a, 3), (sku_b, 2)], order_id=order_id))
 
-    assert response.reserved is True
-    assert len(response.items) == 2
+    # Ответ по спецификации: order_id, status='RESERVED', reserved_at
+    assert response.order_id == order_id
+    assert response.status == 'RESERVED'
+    assert response.reserved_at is not None
     # Состояние SKU после reserve
     assert inventory.skus[sku_a] == {'active_quantity': 7, 'reserved_quantity': 3}
     assert inventory.skus[sku_b] == {'active_quantity': 3, 'reserved_quantity': 3}
-    # Ответ содержит remaining_stock и reserved_quantity по каждому SKU
-    by_id = {item.sku_id: item for item in response.items}
-    assert by_id[sku_a].reserved_quantity == 3
-    assert by_id[sku_a].remaining_stock == 7
-    assert by_id[sku_b].reserved_quantity == 2
-    assert by_id[sku_b].remaining_stock == 3
     # active_quantity ни у одного не достиг 0 → нет outbox-событий
     assert outbox.enqueued == []
     # Записан processed_event для idempotency
@@ -144,15 +143,18 @@ async def test_idempotent_reserve_returns_200_without_double_deduction():
     inventory.add_sku(sku_a, active=10, reserved=0)
 
     idem_key = uuid4()
-    first = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key))
-    assert first.reserved is True
+    order_id = uuid4()
+    first = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key, order_id=order_id))
+    assert first.status == 'RESERVED'
+    assert first.order_id == order_id
     assert inventory.skus[sku_a] == {'active_quantity': 7, 'reserved_quantity': 3}
 
     # Повторный вызов с тем же ключом
-    second = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key))
-    # Ответ идентичен
-    assert second.reserved is True
-    assert {item.sku_id: item.remaining_stock for item in second.items} == {sku_a: 7}
+    second = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key, order_id=order_id))
+    # Ответ идентичен (cached)
+    assert second.status == 'RESERVED'
+    assert second.order_id == order_id
+    assert second.reserved_at == first.reserved_at
     # Никакого второго списания
     assert inventory.skus[sku_a] == {'active_quantity': 7, 'reserved_quantity': 3}
     # reserve() вызван только один раз
@@ -173,18 +175,17 @@ async def test_idempotent_reserve_with_different_items_returns_cached():
     inventory.add_sku(sku_a, active=10, reserved=0)
 
     idem_key = uuid4()
-    first = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key))
+    order_id = uuid4()
+    first = await use_case(make_request([(sku_a, 3)], idempotency_key=idem_key, order_id=order_id))
     # Второй вызов с тем же ключом, но другим quantity
-    second = await use_case(make_request([(sku_a, 5)], idempotency_key=idem_key))
+    second = await use_case(make_request([(sku_a, 5)], idempotency_key=idem_key, order_id=order_id))
 
-    # Возвращаем cached от первого вызова (reserved_quantity=3, remaining=7)
-    assert {item.sku_id: item.remaining_stock for item in second.items} == {sku_a: 7}
+    # Возвращаем cached от первого вызова
+    assert second.order_id == first.order_id
+    assert second.status == first.status
+    assert second.reserved_at == first.reserved_at
     # Состояние SKU соответствует первому вызову (никакого второго списания)
     assert inventory.skus[sku_a] == {'active_quantity': 7, 'reserved_quantity': 3}
-    # Однако в ответе reserved_quantity = тот же, что в первом
-    assert {item.sku_id: item.reserved_quantity for item in second.items} == {sku_a: 3}
-    # Проверим что первый ответ совпадает с cached
-    assert first.items[0].reserved_quantity == second.items[0].reserved_quantity
 
 
 @pytest.mark.anyio
@@ -196,7 +197,7 @@ async def test_sku_out_of_stock_event_emitted():
 
     response = await use_case(make_request([(sku_id, 2)]))
 
-    assert response.reserved is True
+    assert response.status == 'RESERVED'
     assert inventory.skus[sku_id]['active_quantity'] == 0
     assert len(outbox.enqueued) == 1
     event = outbox.enqueued[0]

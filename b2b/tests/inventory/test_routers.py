@@ -14,10 +14,11 @@ from fastapi.testclient import TestClient
 from apps.errors import setup_error_handlers
 from apps.inventory.errors import InventoryConflictError
 from apps.inventory.routers import router as inventory_router
+from datetime import UTC, datetime
+
 from apps.inventory.schemas import (
     FulfillRequestSchema,
     FulfillResponseSchema,
-    ReserveItemResponseSchema,
     ReserveRequestSchema,
     ReserveResponseSchema,
     UnreserveRequestSchema,
@@ -35,10 +36,10 @@ class StubReserveUseCase:
     def __init__(self):
         self.calls: list[ReserveRequestSchema] = []
         self.error: Exception | None = None
-        sku_id = uuid4()
         self.response = ReserveResponseSchema(
-            reserved=True,
-            items=[ReserveItemResponseSchema(sku_id=sku_id, reserved_quantity=2, remaining_stock=8)],
+            order_id=uuid4(),
+            status='RESERVED',
+            reserved_at=datetime.now(UTC),
         )
 
     async def __call__(self, data: ReserveRequestSchema) -> ReserveResponseSchema:
@@ -51,7 +52,11 @@ class StubReserveUseCase:
 class StubUnreserveUseCase:
     def __init__(self):
         self.calls: list[UnreserveRequestSchema] = []
-        self.response = UnreserveResponseSchema(ok=True)
+        self.response = UnreserveResponseSchema(
+            order_id=uuid4(),
+            status='UNRESERVED',
+            processed_at=datetime.now(UTC),
+        )
 
     async def __call__(self, data: UnreserveRequestSchema) -> UnreserveResponseSchema:
         self.calls.append(data)
@@ -115,18 +120,26 @@ def _make_app(
     return app
 
 
-def _reserve_payload(sku_id: UUID | None = None, idempotency_key: UUID | None = None) -> dict:
+def _reserve_payload(
+    sku_id: UUID | None = None,
+    idempotency_key: UUID | None = None,
+    order_id: UUID | None = None,
+) -> dict:
     return {
         'idempotency_key': str(idempotency_key or uuid4()),
+        'order_id': str(order_id or uuid4()),
         'items': [
             {'sku_id': str(sku_id or uuid4()), 'quantity': 2},
         ],
     }
 
 
-def _unreserve_payload(sku_id: UUID | None = None, idempotency_key: UUID | None = None) -> dict:
+def _unreserve_payload(
+    sku_id: UUID | None = None,
+    order_id: UUID | None = None,
+) -> dict:
     return {
-        'idempotency_key': str(idempotency_key or uuid4()),
+        'order_id': str(order_id or uuid4()),
         'items': [
             {'sku_id': str(sku_id or uuid4()), 'quantity': 2},
         ],
@@ -168,8 +181,9 @@ def test_reserve_returns_200(client: TestClient, stubs, service_key_headers):
 
     assert response.status_code == 200
     body = response.json()
-    assert body['reserved'] is True
-    assert len(body['items']) == 1
+    assert body['status'] == 'RESERVED'
+    assert 'order_id' in body
+    assert 'reserved_at' in body
     assert len(reserve_stub.calls) == 1
 
 
@@ -258,7 +272,10 @@ def test_unreserve_returns_200(client: TestClient, stubs, service_key_headers):
     )
 
     assert response.status_code == 200
-    assert response.json() == {'ok': True}
+    body = response.json()
+    assert body['status'] == 'UNRESERVED'
+    assert 'order_id' in body
+    assert 'processed_at' in body
     assert len(unreserve_stub.calls) == 1
 
 

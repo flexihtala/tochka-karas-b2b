@@ -3,12 +3,15 @@
 Бизнес-правила (см. neomarket-canon/flows/b2b-flows.md#reserve-sku):
 
 - Для каждого item: `reserved_quantity -= quantity`, `active_quantity += quantity`.
-- Идемпотентность по `(sender=b2c, idempotency_key)` через таблицу
+- Идемпотентность по `(sender=b2c, order_id)` через таблицу
   `processed_events`. Повтор → возвращаем cached response.
 - Auth: X-Service-Key (b2c_to_b2b) — на уровне роутера.
 
-Канон ожидает `{ok: true}` (UnreserveResponseSchema).
+Контракт ответа (см. neomarket-protocols/b2b/openapi.yaml#InventoryOrderResponse):
+`{order_id, status: 'UNRESERVED', processed_at}`.
 """
+
+from datetime import UTC, datetime
 
 from apps.inbox.repositories import InboxRepository
 from apps.inventory.repositories import InventoryRepository
@@ -32,18 +35,22 @@ class UnreserveInventoryUseCase:
         sender = ServiceName.B2C
 
         async with self.session_manager.get_session() as session:
-            cached = await self.inbox_repository.get_cached_response(session, sender, data.idempotency_key)
+            cached = await self.inbox_repository.get_cached_response(session, sender, data.order_id)
             if cached is not None:
                 return UnreserveResponseSchema.model_validate(cached)
 
             items = [(it.sku_id, it.quantity) for it in data.items]
             await self.inventory_repository.unreserve(session, items)
 
-            response = UnreserveResponseSchema(ok=True)
+            response = UnreserveResponseSchema(
+                order_id=data.order_id,
+                status='UNRESERVED',
+                processed_at=datetime.now(UTC),
+            )
             await self.inbox_repository.record(
                 session,
                 sender,
-                data.idempotency_key,
+                data.order_id,
                 response.model_dump(mode='json'),
             )
             return response

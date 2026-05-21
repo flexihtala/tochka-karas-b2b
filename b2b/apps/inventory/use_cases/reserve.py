@@ -15,6 +15,9 @@
 - Аутентификация: X-Service-Key (направление b2c_to_b2b). Проверяется
   на уровне роутера через FastAPI dependency.
 
+Контракт ответа (см. neomarket-protocols/b2b/openapi.yaml#ReserveResponse):
+`{order_id, status: 'RESERVED', reserved_at}`.
+
 Транзакционная граница use-case:
     [SELECT processed_events] →
     [SELECT skus FOR UPDATE + validate + UPDATE skus] →
@@ -24,11 +27,12 @@
 Всё в одной session-транзакции для атомарной idempotency.
 """
 
+from datetime import UTC, datetime
+
 from apps.inbox.repositories import InboxRepository
 from apps.inventory.enums import InventoryEventType
 from apps.inventory.repositories import InventoryRepository
 from apps.inventory.schemas import (
-    ReserveItemResponseSchema,
     ReserveRequestSchema,
     ReserveResponseSchema,
 )
@@ -76,17 +80,11 @@ class ReserveInventoryUseCase:
                         ),
                     )
 
-            # 4. Сформировать ответ
+            # 4. Сформировать ответ согласно спецификации
             response = ReserveResponseSchema(
-                reserved=True,
-                items=[
-                    ReserveItemResponseSchema(
-                        sku_id=r.sku_id,
-                        reserved_quantity=r.reserved_quantity,
-                        remaining_stock=r.remaining_stock,
-                    )
-                    for r in reserve_results
-                ],
+                order_id=data.order_id,
+                status='RESERVED',
+                reserved_at=datetime.now(UTC),
             )
 
             # 5. Записать idempotency-кеш
