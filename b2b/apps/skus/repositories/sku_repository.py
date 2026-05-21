@@ -14,6 +14,7 @@ class SKURepository(DBCrudRepository[SKU, SKUCreateSchema, SKUReadSchema, SKUUpd
             return int((await session.execute(query)).scalar_one())
 
     async def list_ids_by_product(self, product_id: UUID) -> list[UUID]:
+        """Возвращает список UUID всех SKU у товара. Используется для cascade-события PRODUCT_DELETED в B2C."""
         query = select(SKU.id).where(SKU.product_id == product_id)
         async with self.session_manager.get_session() as session:
             return list((await session.execute(query)).scalars().all())

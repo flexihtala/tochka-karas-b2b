@@ -38,7 +38,7 @@ def make_request(
     product_id: UUID,
     name: str = '256GB Black',
     price: int = 12_999_000,
-    cost_price: int = 9_500_000,
+    cost_price: int | None = 9_500_000,
     discount: int = 0,
     stock_quantity: int = 0,
     article: str | None = None,
@@ -148,6 +148,8 @@ async def test_first_sku_emits_created_event_to_moderation():
     assert sku_snapshot['id'] == str(response.id)
     assert sku_snapshot['name'] == '256GB Black'
     assert sku_snapshot['price'] == 12_999_000
+    # stock_quantity per canon: active_quantity + reserved_quantity.
+    assert sku_snapshot['stock_quantity'] == sku_snapshot['active_quantity'] + sku_snapshot['reserved_quantity']
 
 
 @pytest.mark.anyio
@@ -248,3 +250,55 @@ async def test_response_contains_active_quantity_from_stock_and_zero_reserved():
 
     assert response.active_quantity == 10
     assert response.reserved_quantity == 0
+
+
+@pytest.mark.anyio
+async def test_sku_response_includes_stock_quantity():
+    """SKUResponse contains stock_quantity = active_quantity + reserved_quantity (canon)."""
+    products = FakeProductRepositoryReadable()
+    user = make_authenticated_user()
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+
+    use_case = make_use_case(product_repository=products)
+
+    response = await use_case(make_request(product_id=product_id, stock_quantity=42), user)
+
+    # At creation: reserved_quantity = 0, so stock_quantity == active_quantity == request.stock_quantity.
+    assert response.stock_quantity == 42
+    assert response.stock_quantity == response.active_quantity + response.reserved_quantity
+
+
+@pytest.mark.anyio
+async def test_create_sku_without_cost_price_succeeds():
+    """Omitting cost_price (per OpenAPI it's optional) must NOT 422 — stored as None."""
+    products = FakeProductRepositoryReadable()
+    user = make_authenticated_user()
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+
+    use_case = make_use_case(product_repository=products)
+
+    request = SKUCreateRequestSchema(
+        product_id=product_id,
+        name='256GB Black',
+        price=12_999_000,
+        # cost_price omitted entirely
+        images=[SKUImageCreateRequestSchema(url='/s3/iphone15-black-256.jpg', ordering=0)],
+    )
+
+    response = await use_case(request, user)
+
+    assert response.cost_price is None
+
+
+@pytest.mark.anyio
+async def test_create_sku_with_null_cost_price_succeeds():
+    """Explicit null cost_price (per OpenAPI nullable: true) must NOT 422 — stored as None."""
+    products = FakeProductRepositoryReadable()
+    user = make_authenticated_user()
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+
+    use_case = make_use_case(product_repository=products)
+
+    response = await use_case(make_request(product_id=product_id, cost_price=None), user)
+
+    assert response.cost_price is None

@@ -41,6 +41,7 @@ class StubCreateSKUUseCase:
             article=None,
             active_quantity=0,
             reserved_quantity=0,
+            stock_quantity=0,
             images=[
                 SKUImageResponseSchema(id=uuid4(), url='/s3/iphone15-black-256.jpg', ordering=0),
             ],
@@ -124,12 +125,54 @@ def test_create_sku_endpoint_returns_201(stub: StubCreateSKUUseCase):
     assert body['cost_price'] == 9_500_000
     assert body['active_quantity'] == 0
     assert body['reserved_quantity'] == 0
+    assert body['stock_quantity'] == 0
     assert len(body['images']) == 1
     assert len(body['characteristics']) == 1
     assert len(stub.calls) == 1
     request_data, current_user = stub.calls[0]
     assert request_data.name == '256GB Black'
     assert current_user.id == user.id
+
+
+def test_create_sku_endpoint_response_includes_stock_quantity(stub: StubCreateSKUUseCase):
+    """SKUResponse exposes stock_quantity per neomarket-protocols/b2b/openapi.yaml."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    response = client.post('/api/v1/skus', json=_request_payload())
+
+    assert response.status_code == 201
+    assert 'stock_quantity' in response.json()
+
+
+def test_create_sku_without_cost_price_returns_201(stub: StubCreateSKUUseCase):
+    """cost_price is optional per OpenAPI — omitting it must not 422."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    payload = _request_payload()
+    payload.pop('cost_price')
+
+    response = client.post('/api/v1/skus', json=payload)
+
+    assert response.status_code == 201
+    request_data, _ = stub.calls[0]
+    assert request_data.cost_price is None
+
+
+def test_create_sku_with_null_cost_price_returns_201(stub: StubCreateSKUUseCase):
+    """cost_price is nullable per OpenAPI — explicit null must not 422."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    payload = _request_payload()
+    payload['cost_price'] = None
+
+    response = client.post('/api/v1/skus', json=payload)
+
+    assert response.status_code == 201
+    request_data, _ = stub.calls[0]
+    assert request_data.cost_price is None
 
 
 def test_create_sku_unauthorized_returns_401(stub: StubCreateSKUUseCase):

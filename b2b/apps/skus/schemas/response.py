@@ -21,7 +21,10 @@ class SKUCharacteristicResponseSchema(BaseModel):
 
 
 class SKUResponseSchema(BaseModel):
-    """Seller view SKU — содержит cost_price и reserved_quantity."""
+    """Seller view SKU — содержит cost_price и reserved_quantity.
+
+    stock_quantity = active_quantity + reserved_quantity (canonical invariant).
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,11 +32,12 @@ class SKUResponseSchema(BaseModel):
     product_id: UUID
     name: str
     price: int
-    cost_price: int
+    cost_price: int | None = None
     discount: int
     article: str | None = None
     active_quantity: int
     reserved_quantity: int
+    stock_quantity: int
     images: list[SKUImageResponseSchema] = Field(default_factory=list)
     characteristics: list[SKUCharacteristicResponseSchema] = Field(default_factory=list)
     created_at: datetime
