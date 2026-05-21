@@ -8,8 +8,10 @@
 - Идемпотентность **по `order_id`**: пары `(order_id, sku_id)` запоминаются
   в таблице `fulfilled_orders` (UNIQUE(order_id, sku_id)). Повторный fulfill
   по тому же order_id видит существующие записи и пропускает соответствующие
-  items — двойного списания не происходит, ответ всегда `{ok: true}`.
+  items — двойного списания не происходит, ответ всегда {order_id, status='FULFILLED', processed_at}.
 - Auth: X-Service-Key (b2c_to_b2b) — на уровне роутера.
+
+Контракт ответа: InventoryOrderResponse из neomarket-protocols/b2b/openapi.yaml.
 
 Отличие от reserve/unreserve: используется НЕ `processed_events`-кеш, а
 **отдельная таблица `fulfilled_orders`**. См. ADR-0002 — выбор обоснован
@@ -24,6 +26,8 @@ B2C отправляет разные idempotency_key.
 Всё в одной session-транзакции — UNIQUE constraint защищает от
 параллельных fulfill'ов с одним order_id.
 """
+
+from datetime import UTC, datetime
 
 from apps.inventory.repositories import (
     FulfilledOrderRepository,
@@ -57,9 +61,13 @@ class FulfillInventoryUseCase:
                 (item.sku_id, item.quantity) for item in data.items if item.sku_id not in already_fulfilled
             ]
 
-            # 3. Если все items уже обработаны — повтор, просто возвращаем {ok: true}
+            # 3. Если все items уже обработаны — повтор, просто возвращаем FULFILLED.
             if not items_to_fulfill:
-                return FulfillResponseSchema(ok=True)
+                return FulfillResponseSchema(
+                    order_id=data.order_id,
+                    status='FULFILLED',
+                    processed_at=datetime.now(UTC),
+                )
 
             # 4. SELECT FOR UPDATE + UPDATE: reserved_quantity -= quantity (active не меняется)
             await self.inventory_repository.fulfill(session, items_to_fulfill)
@@ -69,4 +77,8 @@ class FulfillInventoryUseCase:
             for sku_id, quantity in items_to_fulfill:
                 await self.fulfilled_order_repository.record(session, data.order_id, sku_id, quantity)
 
-            return FulfillResponseSchema(ok=True)
+            return FulfillResponseSchema(
+                order_id=data.order_id,
+                status='FULFILLED',
+                processed_at=datetime.now(UTC),
+            )

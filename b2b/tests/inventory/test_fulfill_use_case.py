@@ -63,7 +63,7 @@ async def test_fulfill_decreases_reserved_quantity():
 
     response = await use_case(make_request([(sku_a, 3), (sku_b, 2)]))
 
-    assert response.ok is True
+    assert response.status == "FULFILLED"
     # reserved_quantity уменьшился ровно на quantity
     assert inventory.skus[sku_a]['reserved_quantity'] == 0
     assert inventory.skus[sku_b]['reserved_quantity'] == 0
@@ -86,7 +86,7 @@ async def test_active_quantity_unchanged():
 
     response = await use_case(make_request([(sku_id, 3)]))
 
-    assert response.ok is True
+    assert response.status == "FULFILLED"
     # active_quantity — без изменений
     assert inventory.skus[sku_id]['active_quantity'] == 7
     # reserved_quantity — уменьшился
@@ -108,14 +108,14 @@ async def test_idempotent_fulfill_no_double_deduction():
 
     order_id = uuid4()
     first = await use_case(make_request([(sku_a, 3), (sku_b, 2)], order_id=order_id))
-    assert first.ok is True
+    assert first.status == "FULFILLED"
     # После первого fulfill — резерв снят
     assert inventory.skus[sku_a]['reserved_quantity'] == 0
     assert inventory.skus[sku_b]['reserved_quantity'] == 0
 
     # Повторный вызов с тем же order_id
     second = await use_case(make_request([(sku_a, 3), (sku_b, 2)], order_id=order_id))
-    assert second.ok is True
+    assert second.status == "FULFILLED"
     # Состояние не изменилось — никакого второго списания
     assert inventory.skus[sku_a]['reserved_quantity'] == 0
     assert inventory.skus[sku_b]['reserved_quantity'] == 0
@@ -145,7 +145,7 @@ async def test_partial_idempotency_records_only_new_pairs():
 
     # Повтор с расширенным набором items — sku_a уже зафиксирован, sku_b — нет
     response = await use_case(make_request([(sku_a, 3), (sku_b, 2)], order_id=order_id))
-    assert response.ok is True
+    assert response.status == "FULFILLED"
     # sku_a — без изменений
     assert inventory.skus[sku_a]['reserved_quantity'] == 0
     # sku_b — списан
@@ -186,7 +186,7 @@ async def test_fulfill_missing_sku_ignored():
 
     response = await use_case(make_request([(existing, 3), (missing, 1)]))
 
-    assert response.ok is True
+    assert response.status == "FULFILLED"
     assert inventory.skus[existing]['reserved_quantity'] == 0
     assert missing not in inventory.skus
     # В журнал попадают ОБЕ записи — журнал ведётся независимо от факта существования SKU,

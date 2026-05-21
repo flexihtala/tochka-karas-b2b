@@ -60,8 +60,14 @@ class StubUnreserveUseCase:
 
 class StubFulfillUseCase:
     def __init__(self):
+        from datetime import UTC, datetime
+
         self.calls: list[FulfillRequestSchema] = []
-        self.response = FulfillResponseSchema(ok=True)
+        self.response = FulfillResponseSchema(
+            order_id=uuid4(),
+            status='FULFILLED',
+            processed_at=datetime.now(UTC),
+        )
 
     async def __call__(self, data: FulfillRequestSchema) -> FulfillResponseSchema:
         self.calls.append(data)
@@ -283,7 +289,10 @@ def test_fulfill_returns_200(client: TestClient, stubs, service_key_headers):
     )
 
     assert response.status_code == 200
-    assert response.json() == {'ok': True}
+    body = response.json()
+    assert body['status'] == 'FULFILLED'
+    assert 'order_id' in body
+    assert 'processed_at' in body
     assert len(fulfill_stub.calls) == 1
 
 

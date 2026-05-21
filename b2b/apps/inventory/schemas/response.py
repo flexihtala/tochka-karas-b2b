@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,11 +42,16 @@ class UnreserveResponseSchema(BaseModel):
 
 
 class FulfillResponseSchema(BaseModel):
-    """Ответ POST /inventory/fulfill (US-B2B-10). Канон: `{ok: true}`.
+    """Ответ POST /inventory/fulfill (US-B2B-10).
 
-    Не возвращаем подробное состояние SKU: fulfill идёт после оператора-менеджера
-    и B2C нужен только сигнал «принято». Повтор по тому же `order_id` — тот же
-    `{ok: true}`.
+    Соответствует InventoryOrderResponse в neomarket-protocols/b2b/openapi.yaml:
+    required [order_id, status, processed_at], status='FULFILLED'.
+
+    Повтор по тому же `order_id` — возвращаем кэшированный response.
     """
 
-    ok: bool = True
+    model_config = ConfigDict(from_attributes=True)
+
+    order_id: UUID
+    status: str = 'FULFILLED'
+    processed_at: datetime
