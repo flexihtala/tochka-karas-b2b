@@ -280,7 +280,7 @@ def test_edit_sku_endpoint_returns_200(stub: StubCreateSKUUseCase, edit_stub: St
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
     sku_id = uuid4()
 
-    response = client.put(f'/api/v1/skus/{sku_id}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{sku_id}', json=_edit_request_payload())
 
     assert response.status_code == 200
     body = response.json()
@@ -298,7 +298,7 @@ def test_edit_sku_endpoint_returns_200(stub: StubCreateSKUUseCase, edit_stub: St
 def test_edit_sku_unauthorized_returns_401(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
     client = TestClient(_make_app(stub, user=None, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 401
     assert edit_stub.calls == []
@@ -308,7 +308,7 @@ def test_edit_sku_non_seller_returns_403(stub: StubCreateSKUUseCase, edit_stub: 
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'FORBIDDEN'
@@ -319,7 +319,7 @@ def test_edit_sku_not_owner_returns_403(stub: StubCreateSKUUseCase, edit_stub: S
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'NOT_OWNER'
@@ -330,7 +330,7 @@ def test_edit_sku_hard_blocked_returns_403(stub: StubCreateSKUUseCase, edit_stub
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'HARD_BLOCKED'
@@ -341,7 +341,7 @@ def test_edit_sku_not_found_returns_404(stub: StubCreateSKUUseCase, edit_stub: S
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 404
     assert response.json()['code'] == 'NOT_FOUND'
@@ -354,7 +354,7 @@ def test_edit_sku_validation_error_returns_400(stub: StubCreateSKUUseCase, edit_
     payload = _edit_request_payload()
     payload['price'] = -100  # отрицательная цена недопустима (ge=0)
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=payload)
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=payload)
 
     assert response.status_code == 400
     assert response.json()['code'] == 'INVALID_REQUEST'
@@ -368,7 +368,7 @@ def test_edit_sku_missing_images_returns_400(stub: StubCreateSKUUseCase, edit_st
     payload = _edit_request_payload()
     payload['images'] = []
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json=payload)
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=payload)
 
     assert response.status_code == 400
     body = response.json()
@@ -380,7 +380,7 @@ def test_edit_sku_partial_body_accepted(stub: StubCreateSKUUseCase, edit_stub: S
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/skus/{uuid4()}', json={})
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json={})
 
     assert response.status_code == 200
     assert len(edit_stub.calls) == 1

@@ -271,7 +271,7 @@ def test_edit_product_endpoint_returns_200(stub: StubCreateProductUseCase, edit_
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
     product_id = uuid4()
 
-    response = client.put(f'/api/v1/products/{product_id}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{product_id}', json=_edit_request_payload())
 
     assert response.status_code == 200
     body = response.json()
@@ -288,7 +288,7 @@ def test_edit_product_endpoint_returns_200(stub: StubCreateProductUseCase, edit_
 def test_edit_product_unauthorized_returns_401(stub: StubCreateProductUseCase, edit_stub: StubEditProductUseCase):
     client = TestClient(_make_app(stub, user=None, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 401
     assert edit_stub.calls == []
@@ -298,7 +298,7 @@ def test_edit_product_non_seller_returns_403(stub: StubCreateProductUseCase, edi
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'FORBIDDEN'
@@ -310,7 +310,7 @@ def test_edit_product_not_owner_returns_403(stub: StubCreateProductUseCase, edit
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'NOT_OWNER'
@@ -321,7 +321,7 @@ def test_edit_product_hard_blocked_returns_403(stub: StubCreateProductUseCase, e
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'HARD_BLOCKED'
@@ -332,7 +332,7 @@ def test_edit_product_not_found_returns_404(stub: StubCreateProductUseCase, edit
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 404
     assert response.json()['code'] == 'NOT_FOUND'
@@ -343,7 +343,7 @@ def test_edit_product_invalid_category_returns_400(stub: StubCreateProductUseCas
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 400
     assert response.json()['code'] == 'INVALID_REQUEST'
@@ -357,7 +357,7 @@ def test_edit_product_validation_error_returns_400(stub: StubCreateProductUseCas
     payload = _edit_request_payload()
     payload['title'] = 'x' * 256
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json=payload)
+    response = client.patch(f'/api/v1/products/{uuid4()}', json=payload)
 
     assert response.status_code == 400
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Невалидное тело запроса'}
@@ -368,7 +368,7 @@ def test_edit_product_partial_body_accepted(stub: StubCreateProductUseCase, edit
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.put(f'/api/v1/products/{uuid4()}', json={})
+    response = client.patch(f'/api/v1/products/{uuid4()}', json={})
 
     assert response.status_code == 200
     assert len(edit_stub.calls) == 1

@@ -36,7 +36,7 @@ async def create_sku(
     return await use_case(data, current_user)
 
 
-@router.put(
+@router.patch(
     '/{sku_id}',
     status_code=status.HTTP_200_OK,
     response_model=SKUResponseSchema,

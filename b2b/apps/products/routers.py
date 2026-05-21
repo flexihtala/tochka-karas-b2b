@@ -36,7 +36,7 @@ async def create_product(
     return await use_case(data, current_user)
 
 
-@router.put(
+@router.patch(
     '/{product_id}',
     status_code=status.HTTP_200_OK,
     response_model=ProductResponseSchema,
