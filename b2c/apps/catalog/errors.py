@@ -15,6 +15,13 @@ class InvalidSortError(CatalogError):
         super().__init__('INVALID_REQUEST', message, 400)
 
 
+class InvalidSearchError(CatalogError):
+    """Невалидный поисковый запрос (< 3 или > 255 символов)."""
+
+    def __init__(self, message: str):
+        super().__init__('INVALID_REQUEST', message, 400)
+
+
 class CatalogUnavailableError(CatalogError):
     """B2B недоступен — отвечаем 502 Bad Gateway."""
 

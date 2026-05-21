@@ -37,6 +37,7 @@ async def list_products(
     price_min: int | None = Query(default=None, ge=0),
     price_max: int | None = Query(default=None, ge=0),
     sort: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> CatalogPaginatedResponseSchema:
@@ -45,6 +46,7 @@ async def list_products(
         price_min=price_min,
         price_max=price_max,
         sort=sort,
+        search=search,
         limit=limit,
         offset=offset,
     )

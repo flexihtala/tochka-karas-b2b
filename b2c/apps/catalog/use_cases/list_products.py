@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from apps.catalog.clients import B2BCatalogClient
-from apps.catalog.errors import CatalogUnavailableError, InvalidSortError
+from apps.catalog.errors import CatalogUnavailableError, InvalidSearchError, InvalidSortError
 from apps.catalog.schemas.response import CatalogPaginatedResponseSchema
 from shared.http_clients import ServiceClientError
 
@@ -30,10 +30,12 @@ class ProductSort(StrEnum):
 
 
 class ListProductsUseCase:
-    """GET /api/v1/products — листинг каталога."""
+    """GET /api/v1/products — листинг каталога с фильтрами/сортировкой/поиском."""
 
     DEFAULT_LIMIT = 20
     MAX_LIMIT = 100
+    SEARCH_MIN_LENGTH = 3
+    SEARCH_MAX_LENGTH = 255
 
     def __init__(self, b2b_client: B2BCatalogClient):
         self.b2b_client = b2b_client
@@ -50,6 +52,7 @@ class ListProductsUseCase:
         offset: int = 0,
     ) -> CatalogPaginatedResponseSchema:
         sort_value = self._validate_sort(sort)
+        search_value = self._validate_search(search)
 
         limit = max(1, min(limit, self.MAX_LIMIT))
         offset = max(0, offset)
@@ -65,8 +68,8 @@ class ListProductsUseCase:
             params['price_min'] = price_min
         if price_max is not None:
             params['price_max'] = price_max
-        if search is not None:
-            params['search'] = search
+        if search_value is not None:
+            params['search'] = search_value
 
         try:
             payload = await self.b2b_client.list_products(params)
@@ -87,3 +90,26 @@ class ListProductsUseCase:
             return ProductSort(sort).value
         except ValueError as exc:
             raise InvalidSortError() from exc
+
+    @classmethod
+    def _validate_search(cls, search: str | None) -> str | None:
+        """Валидация ?search.
+
+        - None / пустая строка → пропуск поиска (None).
+        - 1..2 символа → 400.
+        - > 255 символов → 400.
+        - Спецсимволы (`%`, `_`, `'`) — НЕ режутся здесь: проксируем как есть,
+          B2B экранирует на своей стороне перед SQL LIKE. Главное — сохраним
+          их в URL-параметрах, чтобы B2B получил оригинальный текст.
+        """
+        if search is None:
+            return None
+        # Не trim'им: пробелы внутри запроса значимы (фраза). Но "только пробелы"
+        # эквивалентны пустой строке.
+        if search.strip() == '':
+            return None
+        if len(search) < cls.SEARCH_MIN_LENGTH:
+            raise InvalidSearchError(message=f'Search query must be at least {cls.SEARCH_MIN_LENGTH} characters')
+        if len(search) > cls.SEARCH_MAX_LENGTH:
+            raise InvalidSearchError(message=f'Search query must be at most {cls.SEARCH_MAX_LENGTH} characters')
+        return search
