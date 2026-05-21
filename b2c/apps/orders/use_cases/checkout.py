@@ -127,6 +127,7 @@ class CheckoutUseCase:
     def _build_response_from_models(order_schema, item_models) -> OrderResponseSchema:
         return OrderResponseSchema(
             id=order_schema.id,
+            user_id=order_schema.user_id,
             status=order_schema.status,
             items=[
                 OrderItemResponseSchema(
@@ -153,6 +154,7 @@ class CheckoutUseCase:
         item_schemas = await self.order_item_repository.list_for_order(order_schema.id)
         return OrderResponseSchema(
             id=order_schema.id,
+            user_id=order_schema.user_id,
             status=order_schema.status,
             items=[
                 OrderItemResponseSchema(

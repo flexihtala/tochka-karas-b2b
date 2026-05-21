@@ -132,22 +132,22 @@ async def test_unreserve_failure_transitions_to_cancel_pending():
 
 
 @pytest.mark.anyio
-async def test_cancel_assembling_order_returns_409():
-    use_case, order_repo, _, _ = make_use_case()
+async def test_cancel_assembling_order_succeeds_per_spec():
+    """Per spec b2c openapi.yaml: cancel allowed in CREATED/PAID/ASSEMBLING."""
+    use_case, order_repo, b2b_client, _ = make_use_case()
     user = make_user()
     order = make_order(user.id, status=OrderStatus.ASSEMBLING.value)
     order_repo.seed_order(order, [make_item(order.id)])
 
-    with pytest.raises(CancelNotAllowedError) as err:
-        await use_case(order.id, user)
-    assert err.value.current_status == OrderStatus.ASSEMBLING.value
+    response = await use_case(order.id, user)
+    assert response.status == OrderStatus.CANCELLED.value
+    assert len(b2b_client.unreserve_calls) == 1
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     'forbidden_status',
     [
-        OrderStatus.ASSEMBLING.value,
         OrderStatus.DELIVERING.value,
         OrderStatus.DELIVERED.value,
         OrderStatus.CANCELLED.value,

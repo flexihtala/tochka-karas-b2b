@@ -92,6 +92,7 @@ class MarkDeliveredUseCase:
     def _build_response(order, items) -> OrderResponseSchema:  # type: ignore[no-untyped-def]
         return OrderResponseSchema(
             id=order.id,
+            user_id=order.user_id,
             status=order.status,
             items=[
                 OrderItemResponseSchema(

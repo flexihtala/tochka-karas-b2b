@@ -35,6 +35,7 @@ class GetOrderUseCase:
 
         return OrderResponseSchema(
             id=order.id,
+            user_id=order.user_id,
             status=order.status,
             items=[
                 OrderItemResponseSchema(

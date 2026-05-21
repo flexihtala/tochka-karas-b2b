@@ -86,12 +86,18 @@ class StubCheckout:
 
 class StubCancelOrder:
     def __init__(self):
-        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema, str | None]] = []
         self.error: Exception | None = None
         self.response: OrderResponseSchema | None = None
 
-    async def __call__(self, order_id: UUID, current_user: AuthenticatedUserSchema) -> OrderResponseSchema:
-        self.calls.append((order_id, current_user))
+    async def __call__(
+        self,
+        order_id: UUID,
+        current_user: AuthenticatedUserSchema,
+        *,
+        reason: str | None = None,
+    ) -> OrderResponseSchema:
+        self.calls.append((order_id, current_user, reason))
         if self.error:
             raise self.error
         return self.response or _make_order(order_id)
@@ -257,7 +263,8 @@ def test_cancel_order_returns_200(stubs):
 
 def test_cancel_order_not_allowed_returns_409(stubs):
     list_stub, get_stub, cancel_stub = stubs
-    cancel_stub.error = CancelNotAllowedError(current_status='ASSEMBLING')
+    # Per spec: cancel allowed in CREATED/PAID/ASSEMBLING. DELIVERED is not allowed.
+    cancel_stub.error = CancelNotAllowedError(current_status='DELIVERED')
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
 
@@ -266,7 +273,20 @@ def test_cancel_order_not_allowed_returns_409(stubs):
     assert response.status_code == 409
     body = response.json()
     assert body['code'] == 'CANCEL_NOT_ALLOWED'
-    assert body['current_status'] == 'ASSEMBLING'
+    assert body['current_status'] == 'DELIVERED'
+
+
+def test_cancel_order_accepts_optional_reason_per_spec(stubs):
+    """Per spec b2c openapi.yaml: cancel endpoint accepts optional body { reason }."""
+    list_stub, get_stub, cancel_stub = stubs
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    order_id = uuid4()
+    client = TestClient(_make_app(list_stub, get_stub, cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{order_id}/cancel', json={'reason': 'changed my mind'})
+
+    assert response.status_code == 200
+    assert cancel_stub.calls[0][2] == 'changed my mind'
 
 
 def test_cancel_other_user_returns_404(stubs):
