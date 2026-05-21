@@ -29,12 +29,13 @@ error_responses = {
 
 
 @router.get(
-    '/home/banners',
+    '/catalog/banners',
     response_model=list[BannerResponseSchema],
     responses=error_responses,
 )
 @inject
 async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> list[BannerResponseSchema]:
+    """GET /api/v1/catalog/banners — active banners per openapi spec."""
     return await use_case()
 
 
@@ -55,7 +56,7 @@ async def post_banner_event(
 
 
 @router.get(
-    '/home/collections',
+    '/catalog/collections',
     response_model=list[CollectionMetaResponseSchema],
     responses=error_responses,
 )
@@ -63,11 +64,12 @@ async def post_banner_event(
 async def list_home_collections(
     use_case: FromDishka[ListCollectionsUseCase],
 ) -> list[CollectionMetaResponseSchema]:
+    """GET /api/v1/catalog/collections — collections list per openapi spec."""
     return await use_case()
 
 
 @router.get(
-    '/home/collections/{collection_id}/products',
+    '/catalog/collections/{collection_id}/products',
     response_model=CollectionProductsResponseSchema,
     responses=error_responses,
 )
@@ -76,4 +78,9 @@ async def get_home_collection_products(
     collection_id: UUID,
     use_case: FromDishka[GetCollectionProductsUseCase],
 ) -> CollectionProductsResponseSchema:
+    """GET /api/v1/catalog/collections/{id}/products — project extension.
+
+    Spec embeds products inside Collection; this split endpoint keeps the
+    response size bounded and decouples meta-listing from B2B enrichment.
+    """
     return await use_case(collection_id)

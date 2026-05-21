@@ -83,7 +83,7 @@ def test_list_collections_returns_200_empty(stubs):
     list_stub, products_stub = stubs
     client = TestClient(_make_app(list_stub, products_stub))
 
-    response = client.get('/api/v1/home/collections')
+    response = client.get('/api/v1/catalog/collections')
 
     assert response.status_code == 200
     assert response.json() == []
@@ -93,28 +93,21 @@ def test_list_collections_returns_200_empty(stubs):
 def test_list_collections_returns_metadata_only(stubs):
     list_stub, products_stub = stubs
     list_stub.response = [
-        CollectionMetaResponseSchema(
-            id=uuid4(),
-            slug='top',
-            title='Top',
-            description=None,
-            position=0,
+        CollectionMetaResponseSchema.model_validate(
+            {'id': uuid4(), 'slug': 'top', 'title': 'Top', 'description': None, 'position': 0}
         ),
-        CollectionMetaResponseSchema(
-            id=uuid4(),
-            slug='sales',
-            title='Sales',
-            description='Discounted',
-            position=1,
+        CollectionMetaResponseSchema.model_validate(
+            {'id': uuid4(), 'slug': 'sales', 'title': 'Sales', 'description': 'Discounted', 'position': 1}
         ),
     ]
     client = TestClient(_make_app(list_stub, products_stub))
 
-    response = client.get('/api/v1/home/collections')
+    response = client.get('/api/v1/catalog/collections')
 
     assert response.status_code == 200
     body = response.json()
-    assert [c['slug'] for c in body] == ['top', 'sales']
+    # Per openapi spec field is `name`, not `title`.
+    assert [c['name'] for c in body] == ['Top', 'Sales']
     # Ответ — только метаданные.
     for c in body:
         assert 'items' not in c
@@ -140,7 +133,7 @@ def test_get_collection_products_returns_items_and_unavailable(stubs):
     collection_id = uuid4()
     client = TestClient(_make_app(list_stub, products_stub))
 
-    response = client.get(f'/api/v1/home/collections/{collection_id}/products')
+    response = client.get(f'/api/v1/catalog/collections/{collection_id}/products')
 
     assert response.status_code == 200
     body = response.json()
@@ -154,7 +147,7 @@ def test_get_collection_products_unknown_returns_404(stubs):
     products_stub.error = CollectionNotFoundError()
     client = TestClient(_make_app(list_stub, products_stub))
 
-    response = client.get(f'/api/v1/home/collections/{uuid4()}/products')
+    response = client.get(f'/api/v1/catalog/collections/{uuid4()}/products')
 
     assert response.status_code == 404
     assert response.json() == {'code': 'NOT_FOUND', 'message': 'Подборка не найдена'}
@@ -165,7 +158,7 @@ def test_get_collection_products_empty_collection_returns_empty_lists(stubs):
     products_stub.response = CollectionProductsResponseSchema(items=[], unavailable_ids=[])
     client = TestClient(_make_app(list_stub, products_stub))
 
-    response = client.get(f'/api/v1/home/collections/{uuid4()}/products')
+    response = client.get(f'/api/v1/catalog/collections/{uuid4()}/products')
 
     assert response.status_code == 200
     assert response.json() == {'items': [], 'unavailable_ids': []}
