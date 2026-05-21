@@ -176,3 +176,36 @@ def test_checkout_b2b_unavailable_returns_503(checkout_stub):
     assert response.status_code == 503
     body = response.json()
     assert body['code'] == 'B2B_UNAVAILABLE'
+
+
+def test_checkout_idempotency_key_header_overrides_body(checkout_stub):
+    """Per spec: Idempotency-Key is a required header; header takes precedence over body."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(checkout_stub, user=user))
+    body_key = uuid4()
+    header_key = uuid4()
+
+    response = client.post(
+        '/api/v1/orders',
+        json={'idempotency_key': str(body_key), 'items': [{'sku_id': str(uuid4()), 'quantity': 1}]},
+        headers={'Idempotency-Key': str(header_key)},
+    )
+
+    assert response.status_code == 201
+    assert checkout_stub.calls[0][0].idempotency_key == header_key
+
+
+def test_checkout_response_uses_spec_field_names(checkout_stub):
+    """Per spec b2c openapi.yaml: response must expose `total`, `buyer_id`, `subtotal`, item.name."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(checkout_stub, user=user))
+
+    response = client.post('/api/v1/orders', json=_payload())
+
+    assert response.status_code == 201
+    body = response.json()
+    assert 'total' in body
+    assert 'buyer_id' in body
+    assert 'subtotal' in body
+    assert body['subtotal'] == sum(it['line_total'] for it in body['items'])
+    assert 'name' in body['items'][0]
