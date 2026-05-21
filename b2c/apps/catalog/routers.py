@@ -26,7 +26,7 @@ error_responses = {
 
 
 @router.get(
-    '/products',
+    '/catalog/products',
     response_model=CatalogPaginatedResponseSchema,
     responses=error_responses,
 )

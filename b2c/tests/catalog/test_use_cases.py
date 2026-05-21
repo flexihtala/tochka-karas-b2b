@@ -5,6 +5,11 @@
 - test_facets_return_counts_per_filter_value
 - test_invalid_sort_returns_400
 - test_b2b_unavailable_returns_502
+
+Архитектура моков: use-case + B2BCatalogClient + ServiceClient запускаются как
+в проде — мокается ТОЛЬКО внешний HTTP-транспорт (httpx.MockTransport). Это
+гарантирует, что валидация фильтров, проксирование параметров и парсинг ответа
+B2B действительно выполняются.
 """
 
 from uuid import uuid4
@@ -15,17 +20,18 @@ import pytest
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import CatalogUnavailableError, InvalidSortError
 from apps.catalog.use_cases import GetFacetsUseCase, ListProductsUseCase
-from tests.catalog.fakes import MockTransportServiceClient, make_handler
+from tests.catalog.fakes import make_handler, make_service_client
 
 
 def _make_client(handler) -> B2BCatalogClient:
-    return B2BCatalogClient(service_client=MockTransportServiceClient(handler=handler))
+    return B2BCatalogClient(service_client=make_service_client(handler))
 
 
 @pytest.mark.anyio
 async def test_catalog_returns_filtered_sorted_products():
     category_id = uuid4()
     product_id = uuid4()
+    image_id = uuid4()
     captured: list[httpx.Request] = []
 
     def on_request(request: httpx.Request) -> None:
@@ -39,11 +45,17 @@ async def test_catalog_returns_filtered_sorted_products():
                     'items': [
                         {
                             'id': str(product_id),
-                            'title': 'iPhone 15',
-                            'image': 'https://cdn/iphone.jpg',
-                            'price': 12999000,
-                            'in_stock': True,
-                            'is_in_cart': False,
+                            'name': 'iPhone 15',
+                            'min_price': 12999000,
+                            'has_stock': True,
+                            'images': [
+                                {
+                                    'id': str(image_id),
+                                    'url': 'https://cdn/iphone.jpg',
+                                    'ordering': 0,
+                                    'is_main': True,
+                                }
+                            ],
                         }
                     ],
                     'total_count': 1,
@@ -67,7 +79,10 @@ async def test_catalog_returns_filtered_sorted_products():
 
     assert result.total_count == 1
     assert result.items[0].id == product_id
-    assert result.items[0].title == 'iPhone 15'
+    assert result.items[0].name == 'iPhone 15'
+    assert result.items[0].min_price == 12999000
+    assert result.items[0].has_stock is True
+    assert result.items[0].images[0].url == 'https://cdn/iphone.jpg'
 
     # Параметры действительно ушли в B2B.
     sent = captured[0]

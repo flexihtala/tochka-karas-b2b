@@ -5,6 +5,9 @@
 - test_short_query_returns_400
 - test_special_chars_do_not_break_query
 - test_empty_results_returns_200
+
+Мокается только httpx-транспорт (httpx.MockTransport) — use-case, ServiceClient
+и валидация поискового запроса работают как в проде.
 """
 
 from uuid import uuid4
@@ -15,16 +18,17 @@ import pytest
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import InvalidSearchError
 from apps.catalog.use_cases import ListProductsUseCase
-from tests.catalog.fakes import MockTransportServiceClient, make_handler
+from tests.catalog.fakes import make_handler, make_service_client
 
 
 def _client(handler) -> B2BCatalogClient:
-    return B2BCatalogClient(service_client=MockTransportServiceClient(handler=handler))
+    return B2BCatalogClient(service_client=make_service_client(handler))
 
 
 @pytest.mark.anyio
 async def test_search_returns_matching_products():
     product_id = uuid4()
+    image_id = uuid4()
     captured: list[httpx.Request] = []
 
     handler = make_handler(
@@ -35,11 +39,17 @@ async def test_search_returns_matching_products():
                     'items': [
                         {
                             'id': str(product_id),
-                            'title': 'Беспроводные наушники Sony',
-                            'image': 'https://x/h.jpg',
-                            'price': 2999000,
-                            'in_stock': True,
-                            'is_in_cart': False,
+                            'name': 'Беспроводные наушники Sony',
+                            'min_price': 2999000,
+                            'has_stock': True,
+                            'images': [
+                                {
+                                    'id': str(image_id),
+                                    'url': 'https://x/h.jpg',
+                                    'ordering': 0,
+                                    'is_main': True,
+                                }
+                            ],
                         }
                     ],
                     'total_count': 1,
@@ -55,7 +65,7 @@ async def test_search_returns_matching_products():
     result = await use_case(search='наушники')
 
     assert result.total_count == 1
-    assert result.items[0].title == 'Беспроводные наушники Sony'
+    assert result.items[0].name == 'Беспроводные наушники Sony'
     # search должен попасть в query string B2B запроса.
     assert captured[0].url.params['search'] == 'наушники'
 

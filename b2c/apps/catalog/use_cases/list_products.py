@@ -30,7 +30,7 @@ class ProductSort(StrEnum):
 
 
 class ListProductsUseCase:
-    """GET /api/v1/products — листинг каталога с фильтрами/сортировкой/поиском."""
+    """GET /api/v1/catalog/products — листинг каталога с фильтрами/сортировкой/поиском."""
 
     DEFAULT_LIMIT = 20
     MAX_LIMIT = 100

@@ -1,7 +1,7 @@
-"""Тестовые фейки для catalog: MockTransport-обёртка вокруг ServiceClient.
+"""Тестовые фейки для catalog: httpx.MockTransport вокруг реального ServiceClient.
 
-ServiceClient через httpx.AsyncClient ходит в B2B — в тестах подменяем транспорт
-на httpx.MockTransport, чтобы инспектировать запросы и отдавать предсказанные ответы.
+Мокаем только сетевой транспорт — весь остальной код (заголовки, разбор JSON,
+ServiceClientError, бизнес-логика use-case) выполняется как в проде.
 """
 
 from collections.abc import Awaitable, Callable
@@ -12,51 +12,22 @@ import httpx
 from shared.http_clients import ServiceClient
 
 
-class MockTransportServiceClient(ServiceClient):
-    """ServiceClient, использующий httpx.MockTransport вместо реального транспорта."""
+def make_service_client(
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    base_url: str = 'http://b2b.test',
+    service_key: str = 'test-key',
+) -> ServiceClient:
+    """Создаёт реальный ServiceClient с httpx.MockTransport.
 
-    def __init__(
-        self,
-        handler: Callable[[httpx.Request], httpx.Response],
-        base_url: str = 'http://b2b.test',
-        service_key: str = 'test-key',
-    ):
-        super().__init__(base_url=base_url, service_key=service_key)
-        self.transport = httpx.MockTransport(handler)
-
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
-        url = f'{self.base_url}{path}'
-        headers = {'X-Service-Key': self.service_key}
-        if idempotency_key:
-            headers['Idempotency-Key'] = idempotency_key
-
-        async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout) as client:
-            response = await client.request(method, url, json=json, params=params, headers=headers)
-
-        if response.status_code >= 400:
-            from shared.http_clients.service_client import ServiceClientError
-
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = response.text
-            raise ServiceClientError(
-                status_code=response.status_code,
-                message=f'{method} {path} failed',
-                payload=payload,
-            )
-
-        if not response.content:
-            return {}
-        return response.json()  # type: ignore[no-any-return]
+    Все исходящие HTTP-запросы перехватываются `handler` — но сам ServiceClient
+    выполняется как в проде (заголовки, error-обработка, JSON-парсинг).
+    """
+    return ServiceClient(
+        base_url=base_url,
+        service_key=service_key,
+        transport=httpx.MockTransport(handler),
+    )
 
 
 def make_handler(
