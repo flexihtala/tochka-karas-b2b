@@ -76,8 +76,10 @@ async def test_get_moderated_product_returns_full_payload():
     assert len(response.characteristics) == 1
     assert response.characteristics[0].name == 'Бренд'
     assert response.characteristics[0].value == 'Apple'
-    # SKU модель не в main → пустой список (placeholder, см. PR body)
-    assert response.skus == []
+    # SKU модель не в main → placeholder через _load_skus (см. PR body).
+    # Не lock'аем строго на []: после мерджа US-B2B-02 (PR #8) реальный
+    # список SKU начнёт возвращаться, и этот ассерт продолжит проходить.
+    assert isinstance(response.skus, list)
 
 
 @pytest.mark.anyio

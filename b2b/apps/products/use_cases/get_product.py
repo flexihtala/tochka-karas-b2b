@@ -10,6 +10,7 @@ from apps.products.schemas.response import (
     CharacteristicResponseSchema,
     ProductImageResponseSchema,
     ProductResponseSchema,
+    SKUResponseSchema,
 )
 from shared.auth_lib import AuthenticatedUserSchema
 
@@ -32,7 +33,8 @@ class GetProductUseCase:
       ``moderator_comment``. ``field_reports[]`` опущены в этой итерации —
       модель ProductFieldReport ещё не добавлена; см. PR body.
     - MODERATED товар: полный payload, в т.ч. cost_price/reserved_quantity на
-      уровне SKU. SKU-модели пока нет в main (PR #8) → ``skus=[]``-placeholder.
+      уровне SKU. SKU-модели пока нет в main (PR #8) → ``skus`` подгружается
+      через ``_load_skus`` (placeholder-метод, возвращает [] до мерджа PR #8).
 
     Авторизация роли (SELLER) выполняется в роутере через ``require_role``;
     use-case считает ``current_user`` уже валидированным.
@@ -47,6 +49,30 @@ class GetProductUseCase:
         self.product_repository = product_repository
         self.image_repository = image_repository
         self.characteristic_repository = characteristic_repository
+
+    async def _load_skus(self, product_id: UUID) -> list[SKUResponseSchema]:
+        """Загружает список SKU для товара.
+
+        Placeholder: SKU-модель пока не в main (живёт в открытом PR #8,
+        US-B2B-02). После мерджа PR #8 здесь будет:
+
+            sku_entities = await self.sku_repository.list_by_product(product_id)
+            return [
+                SKUResponseSchema(
+                    id=sku.id,
+                    cost_price=sku.cost_price,
+                    reserved_quantity=sku.reserved_quantity,
+                    ...
+                )
+                for sku in sku_entities
+            ]
+
+        Метод выделен отдельно, чтобы:
+        1) не lock'ать тесты на конкретное значение ``skus`` (см. PR #9 review);
+        2) после мерджа US-B2B-02 правка локализуется в одном месте;
+        3) подклассы/моки могут переопределить без замены всего use-case.
+        """
+        return []
 
     async def __call__(
         self,
@@ -65,6 +91,7 @@ class GetProductUseCase:
 
         images = await self.image_repository.list_by_product(product.id)
         characteristics = await self.characteristic_repository.list_by_product(product.id)
+        skus = await self._load_skus(product.id)
 
         return ProductResponseSchema(
             id=product.id,
@@ -84,10 +111,7 @@ class GetProductUseCase:
                 CharacteristicResponseSchema(id=characteristic.id, name=characteristic.name, value=characteristic.value)
                 for characteristic in characteristics
             ],
-            # SKU-модель пока не в main (US-B2B-02 в открытом PR #8). Когда
-            # появится — здесь подгружается список SKU с cost_price/
-            # reserved_quantity (полный seller-view, см. spec ProductResponse).
-            skus=[],
+            skus=skus,
             created_at=product.created_at,
             updated_at=product.updated_at,
         )

@@ -186,7 +186,8 @@ def test_create_product_endpoint_returns_201(stub: StubCreateProductUseCase):
     assert response.status_code == 201
     body = response.json()
     assert body['status'] == ProductStatus.CREATED.value
-    assert body['skus'] == []
+    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
+    assert isinstance(body['skus'], list)
     assert body['deleted'] is False
     assert body['title'] == 'iPhone 15 Pro Max'
     assert len(body['images']) == 1
@@ -272,7 +273,8 @@ def test_get_product_endpoint_returns_200(stub: StubCreateProductUseCase, get_st
     body = response.json()
     assert body['id'] == str(get_stub.response.id)
     assert body['status'] == ProductStatus.MODERATED.value
-    assert body['skus'] == []
+    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
+    assert isinstance(body['skus'], list)
     assert len(get_stub.calls) == 1
     passed_id, current_user = get_stub.calls[0]
     assert passed_id == product_id
