@@ -35,6 +35,7 @@ class ListOrdersUseCase:
             items=[
                 OrderListItemResponseSchema(
                     id=order.id,
+                    user_id=order.user_id,
                     status=order.status,
                     total_amount=order.total_amount,
                     items_count=items_count_map.get(order.id, 0),

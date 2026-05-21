@@ -17,6 +17,9 @@ from .db import (
     OrderUpdateSchema as OrderUpdateSchema,
 )
 from .request import (
+    CancelOrderRequestSchema as CancelOrderRequestSchema,
+)
+from .request import (
     CheckoutItemRequestSchema as CheckoutItemRequestSchema,
 )
 from .request import (
