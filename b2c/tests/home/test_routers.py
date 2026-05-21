@@ -18,18 +18,21 @@ from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
 def _make_banner(banner_id: UUID | None = None, priority: int = 0) -> BannerResponseSchema:
-    now = datetime.now(UTC)
-    return BannerResponseSchema(
-        id=banner_id or uuid4(),
-        title='Promo',
-        image_url='https://cdn.example.com/banner.png',
-        link_url='https://example.com/landing',
-        priority=priority,
-        is_active=True,
-        schedule_start=None,
-        schedule_end=None,
-        created_at=now,
-        updated_at=now,
+    # Build using DB-style aliases (link_url/priority/schedule_*) — model accepts
+    # them via validation_alias for backwards compat with from_attributes().
+    return BannerResponseSchema.model_validate(
+        {
+            'id': banner_id or uuid4(),
+            'title': 'Promo',
+            'image_url': 'https://cdn.example.com/banner.png',
+            'link_url': 'https://example.com/landing',
+            'priority': priority,
+            'is_active': True,
+            'schedule_start': None,
+            'schedule_end': None,
+            'created_at': datetime.now(UTC),
+            'updated_at': datetime.now(UTC),
+        }
     )
 
 
@@ -102,7 +105,7 @@ def test_list_home_banners_returns_200_empty_when_no_banners(stubs):
     list_stub.response = []
     client = TestClient(_make_app(list_stub, click_stub, user=None))
 
-    response = client.get('/api/v1/home/banners')
+    response = client.get('/api/v1/catalog/banners')
 
     assert response.status_code == 200
     assert response.json() == []
@@ -114,12 +117,16 @@ def test_list_home_banners_returns_list_without_auth(stubs):
     list_stub.response = [_make_banner(priority=5), _make_banner(priority=1)]
     client = TestClient(_make_app(list_stub, click_stub, user=None))
 
-    response = client.get('/api/v1/home/banners')
+    response = client.get('/api/v1/catalog/banners')
 
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 2
-    assert body[0]['priority'] == 5
+    # Spec field names: link, ordering, active_from, active_to
+    assert body[0]['ordering'] == 5
+    assert body[0]['link'] == 'https://example.com/landing'
+    assert body[0]['active_from'] is None
+    assert body[0]['active_to'] is None
 
 
 def test_post_banner_event_returns_204_anonymous(stubs):

@@ -16,12 +16,13 @@ error_responses = {
 
 
 @router.get(
-    '/home/banners',
+    '/catalog/banners',
     response_model=list[BannerResponseSchema],
     responses=error_responses,
 )
 @inject
 async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> list[BannerResponseSchema]:
+    """GET /api/v1/catalog/banners — active banners per openapi spec."""
     return await use_case()
 
 
