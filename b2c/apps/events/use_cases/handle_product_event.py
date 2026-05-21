@@ -1,9 +1,12 @@
-"""Use case POST /api/v1/events/product — обработка событий от B2B.
+"""Use case POST /api/v1/b2b/events — обработка событий от B2B.
 
-См. canon: b2c-orders-flows.md, Flow B2C-12. Поддерживает:
-- PRODUCT_BLOCKED
-- PRODUCT_DELETED
-- SKU_OUT_OF_STOCK
+См. canon: b2c-orders-flows.md, Flow B2C-12 и spec neomarket-protocols/b2c/openapi.yaml.
+Поддерживает per spec:
+- PRODUCT_BLOCKED / PRODUCT_HARD_BLOCKED → пометить SKU/product недоступным.
+- PRODUCT_DELETED → пометить product удалённым.
+- SKU_OUT_OF_STOCK → пометить SKU нет в наличии.
+- SKU_BACK_IN_STOCK / PRICE_CHANGED → idempotent ACK без локальных изменений
+  (триггер уведомлений вне scope этого PR).
 
 Поведение (см. ADR US-ORD-04):
 
@@ -31,17 +34,22 @@ from shared.db import SessionManager
 from shared.inbox import IdempotentHandler
 from shared.types import ServiceName
 
-# Маппинг event-type → reason — храним совпадающие строки с UnavailableReason,
-# но enum здесь обёртывает SKU_OUT_OF_STOCK → 'OUT_OF_STOCK' (как в /cart enrichment).
-_REASON_BY_EVENT: dict[ProductEventType, str] = {
+# Маппинг event-type → reason — храним совпадающие строки с UnavailableReason.
+# Per spec b2c openapi.yaml: PRODUCT_HARD_BLOCKED → тот же reason 'BLOCKED'
+# (на уровне B2C обращение одинаковое — продукт скрыт).
+_REASON_BY_EVENT: dict[ProductEventType, str | None] = {
     ProductEventType.PRODUCT_BLOCKED: 'BLOCKED',
+    ProductEventType.PRODUCT_HARD_BLOCKED: 'BLOCKED',
     ProductEventType.PRODUCT_DELETED: 'DELETED',
     ProductEventType.SKU_OUT_OF_STOCK: 'OUT_OF_STOCK',
+    # spec-types без локального побочного эффекта — принимаем idempotent.
+    ProductEventType.SKU_BACK_IN_STOCK: None,
+    ProductEventType.PRICE_CHANGED: None,
 }
 
 
 class HandleProductEventUseCase:
-    """Обрабатывает POST /api/v1/events/product идемпотентно."""
+    """Обрабатывает POST /api/v1/b2b/events идемпотентно."""
 
     def __init__(
         self,
@@ -74,14 +82,15 @@ class HandleProductEventUseCase:
         Записывает SKU в sku_unavailability. Cart-items НЕ модифицируются
         (см. ADR — реакция отражается на следующем GET /cart, обогащение из B2B).
         """
-        reason = _REASON_BY_EVENT[payload.event]
-        await self.unavailability_repository.upsert_many(
-            session,
-            sku_ids=payload.sku_ids,
-            reason=reason,
-            product_id=payload.product_id,
-            event_idempotency_key=payload.idempotency_key,
-        )
+        reason = _REASON_BY_EVENT.get(payload.event)
+        if reason is not None:
+            await self.unavailability_repository.upsert_many(
+                session,
+                sku_ids=payload.sku_ids,
+                reason=reason,
+                product_id=payload.product_id,
+                event_idempotency_key=payload.idempotency_key,
+            )
         return ProductEventResponseSchema(accepted=True)
 
     @staticmethod

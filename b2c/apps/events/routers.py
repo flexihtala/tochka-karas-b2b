@@ -1,7 +1,8 @@
-"""POST /api/v1/events/product — входящий канал событий от B2B.
+"""POST /api/v1/b2b/events — входящий канал событий от B2B.
 
-Аутентификация: X-Service-Key + direction = b2b_to_b2c. См. canon Flow B2C-12
-и shared.inbox.make_verify_service_key.
+Per spec (neomarket-protocols/b2c/openapi.yaml). Аутентификация: X-Service-Key
++ direction = b2b_to_b2c. См. canon Flow B2C-12 и shared.inbox.make_verify_service_key.
+Spec response: 202 Accepted.
 """
 
 from dishka import FromDishka
@@ -15,7 +16,8 @@ from settings import settings
 from shared.inbox import make_verify_service_key
 from shared.types import ServiceKeyDirection
 
-router = APIRouter(prefix='/events')
+# Per spec: путь /api/v1/b2b/events. Router монтируется с общим /api/v1 в apps.router.
+router = APIRouter(prefix='/b2b')
 
 # Конструируем FastAPI-зависимость один раз при импорте.
 verify_b2b_to_b2c = make_verify_service_key(
@@ -31,9 +33,9 @@ error_responses = {
 
 
 @router.post(
-    '/product',
+    '/events',
     response_model=ProductEventResponseSchema,
-    status_code=200,
+    status_code=202,
     responses=error_responses,
     dependencies=[Depends(verify_b2b_to_b2c)],
 )

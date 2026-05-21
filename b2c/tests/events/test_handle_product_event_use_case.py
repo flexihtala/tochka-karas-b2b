@@ -285,7 +285,7 @@ def test_missing_service_key_returns_401():
     stub = _StubHandleProductEvent()
     client = TestClient(_make_app(stub))
 
-    response = client.post('/api/v1/events/product', json=_valid_body())
+    response = client.post('/api/v1/b2b/events', json=_valid_body())
 
     assert response.status_code == 401
     assert response.json()['code'] == 'INVALID_SERVICE_KEY'
@@ -298,7 +298,7 @@ def test_wrong_service_key_returns_401():
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/product',
+        '/api/v1/b2b/events',
         json=_valid_body(),
         headers={'X-Service-Key': 'wrong-key'},
     )
@@ -307,19 +307,40 @@ def test_wrong_service_key_returns_401():
     assert stub.calls == []
 
 
-def test_valid_service_key_returns_200():
-    """С правильным X-Service-Key — 200 и use case вызван."""
+def test_valid_service_key_returns_202():
+    """С правильным X-Service-Key — 202 (per spec) и use case вызван."""
     from settings import settings  # импортируем здесь, чтобы не ловить порядок инициализации
 
     stub = _StubHandleProductEvent()
     client = TestClient(_make_app(stub))
 
     response = client.post(
-        '/api/v1/events/product',
+        '/api/v1/b2b/events',
         json=_valid_body(),
         headers={'X-Service-Key': settings.b2b_to_b2c_key},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json() == {'accepted': True}
+    assert len(stub.calls) == 1
+
+
+def test_accepts_spec_field_names_event_type_and_occurred_at():
+    """Per spec b2c openapi.yaml: B2BEvent uses `event_type` and `occurred_at`."""
+    from settings import settings
+
+    stub = _StubHandleProductEvent()
+    client = TestClient(_make_app(stub))
+    body = _valid_body()
+    # Спецификационные имена полей.
+    body['event_type'] = body.pop('event')
+    body['occurred_at'] = body.pop('date')
+
+    response = client.post(
+        '/api/v1/b2b/events',
+        json=body,
+        headers={'X-Service-Key': settings.b2b_to_b2c_key},
+    )
+
+    assert response.status_code == 202
     assert len(stub.calls) == 1
