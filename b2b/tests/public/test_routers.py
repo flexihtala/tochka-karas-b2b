@@ -1,4 +1,4 @@
-"""Router-level тесты US-B2B-07: GET /api/v1/catalog/products.
+"""Router-level тесты US-B2B-07: GET /api/v1/public/products.
 
 Проверяем интеграцию: парсинг query, auth через X-Service-Key, формат ответа.
 
@@ -124,7 +124,7 @@ def test_catalog_endpoint_returns_200_with_service_key(stub: StubListCatalogUseC
     client = TestClient(_make_app(stub))
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         headers={'X-Service-Key': TEST_SERVICE_KEY},
     )
 
@@ -154,7 +154,7 @@ def test_catalog_missing_service_key_returns_401(stub: StubListCatalogUseCase):
     """Без заголовка X-Service-Key — 401, use-case не вызывается."""
     client = TestClient(_make_app(stub))
 
-    response = client.get('/api/v1/catalog/products')
+    response = client.get('/api/v1/public/products')
 
     assert response.status_code == 401
     body = response.json()
@@ -167,7 +167,7 @@ def test_catalog_wrong_service_key_returns_401(stub: StubListCatalogUseCase):
     client = TestClient(_make_app(stub))
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         headers={'X-Service-Key': 'wrong-key'},
     )
 
@@ -181,7 +181,7 @@ def test_catalog_passes_pagination_to_use_case(stub: StubListCatalogUseCase):
     client = TestClient(_make_app(stub))
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         params={'limit': 50, 'offset': 100},
         headers={'X-Service-Key': TEST_SERVICE_KEY},
     )
@@ -198,7 +198,7 @@ def test_catalog_batch_ids_query_parsed(stub: StubListCatalogUseCase):
     id1, id2 = uuid4(), uuid4()
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         params={'ids': f'{id1},{id2}'},
         headers={'X-Service-Key': TEST_SERVICE_KEY},
     )
@@ -213,7 +213,7 @@ def test_catalog_batch_invalid_uuid_returns_400(stub: StubListCatalogUseCase):
     client = TestClient(_make_app(stub))
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         params={'ids': 'not-a-uuid'},
         headers={'X-Service-Key': TEST_SERVICE_KEY},
     )
@@ -227,7 +227,7 @@ def test_catalog_limit_too_high_returns_400(stub: StubListCatalogUseCase):
     client = TestClient(_make_app(stub))
 
     response = client.get(
-        '/api/v1/catalog/products',
+        '/api/v1/public/products',
         params={'limit': 500},
         headers={'X-Service-Key': TEST_SERVICE_KEY},
     )

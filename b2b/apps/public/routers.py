@@ -1,6 +1,9 @@
-"""US-B2B-07: GET /api/v1/catalog/products — service-to-service витрина для B2C.
+"""US-B2B-07: GET /api/v1/public/products — service-to-service витрина для B2C.
 
 Auth: только X-Service-Key (b2c_to_b2b). JWT не используется.
+
+Путь /api/v1/public/products согласован со спецификацией neomarket-protocols/b2b/openapi.yaml.
+B2C-сторона имеет свой публичный путь /api/v1/catalog/products, который проксирует сюда.
 """
 
 from uuid import UUID
@@ -17,7 +20,7 @@ from shared.errors.base import InvalidRequestError
 from shared.inbox.dependencies import make_verify_service_key
 from shared.types import ServiceKeyDirection
 
-router = APIRouter(prefix='/catalog')
+router = APIRouter(prefix='/public')
 
 verify_b2c_to_b2b = make_verify_service_key(ServiceKeyDirection.B2C_TO_B2B, settings.b2c_to_b2b_key)
 

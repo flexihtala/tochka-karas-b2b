@@ -72,7 +72,7 @@ async def test_catalog_missing_service_key_returns_401():
     setup_error_handlers(app)
     client = TestClient(app)
 
-    response = client.get('/api/v1/catalog/products')
+    response = client.get('/api/v1/public/products')
 
     assert response.status_code == 401
     body = response.json()
