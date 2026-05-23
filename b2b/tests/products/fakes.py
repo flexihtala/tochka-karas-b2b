@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from apps.categories.schemas import CategoryCreateSchema, CategoryReadSchema, CategoryUpdateSchema
@@ -10,7 +11,9 @@ from apps.products.schemas.db import (
     ProductImageCreateSchema,
     ProductImageReadSchema,
     ProductReadSchema,
+    ProductUpdateSchema,
 )
+from shared.outbox import OutboxEnqueueSchema
 
 
 class FakeCategoryRepository:
@@ -57,6 +60,7 @@ class FakeProductRepository:
     def __init__(self):
         self.by_id: dict[UUID, ProductReadSchema] = {}
         self.created: list[ProductCreateSchema] = []
+        self.updated: list[ProductUpdateSchema] = []
 
     def add(
         self,
@@ -64,14 +68,15 @@ class FakeProductRepository:
         id: UUID | None = None,
         seller_id: UUID | None = None,
         category_id: UUID | None = None,
-        title: str = 'Test product',
-        slug: str = 'test-product',
-        description: str = 'desc',
+        title: str = 'iPhone 15 Pro Max',
+        slug: str = 'iphone-15-pro-max',
+        description: str = 'Флагман Apple',
         status: ProductStatus = ProductStatus.MODERATED,
         deleted: bool = False,
         blocking_reason_id: UUID | None = None,
         moderator_comment: str | None = None,
     ) -> ProductReadSchema:
+        """Посадить уже существующий продукт (используется в get/edit/delete-тестах)."""
         product_id = id or uuid4()
         now = datetime.now(UTC)
         product = ProductReadSchema(
@@ -114,6 +119,40 @@ class FakeProductRepository:
 
     async def get_or_none(self, id_: UUID) -> ProductReadSchema | None:
         return self.by_id.get(id_)
+
+    async def update(self, data: ProductUpdateSchema) -> ProductReadSchema | None:
+        self.updated.append(data)
+        product = self.by_id.get(data.id)
+        if product is None:
+            return None
+        updates = data.model_dump(exclude_unset=True, exclude={'id'})
+        merged = product.model_copy(update=updates)
+        self.by_id[data.id] = merged
+        return merged
+
+    async def list_by_seller(self, seller_id: UUID, *, include_deleted: bool = False) -> list[ProductReadSchema]:
+        rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
+        if not include_deleted:
+            rows = [p for p in rows if not p.deleted]
+        return rows
+
+
+class FakeSKURepositoryForDelete:
+    """Минималистичный SKU-фейк для тестов удаления товара.
+
+    Поддерживает только `list_ids_by_product` — единственный вызов из DeleteProductUseCase.
+    """
+
+    def __init__(self):
+        self.ids_by_product: dict[UUID, list[UUID]] = {}
+
+    def add_sku(self, product_id: UUID, sku_id: UUID | None = None) -> UUID:
+        new_id = sku_id or uuid4()
+        self.ids_by_product.setdefault(product_id, []).append(new_id)
+        return new_id
+
+    async def list_ids_by_product(self, product_id: UUID) -> list[UUID]:
+        return list(self.ids_by_product.get(product_id, []))
 
 
 class FakeProductImageRepository:
@@ -163,6 +202,12 @@ class FakeProductImageRepository:
             key=lambda x: x.ordering,
         )
 
+    async def delete_by_product(self, product_id: UUID) -> int:
+        to_delete = [iid for iid, image in self.by_id.items() if image.product_id == product_id]
+        for iid in to_delete:
+            del self.by_id[iid]
+        return len(to_delete)
+
 
 class FakeCharacteristicValueRepository:
     def __init__(self):
@@ -207,3 +252,30 @@ class FakeCharacteristicValueRepository:
 
     async def list_by_product(self, product_id: UUID) -> list[CharacteristicValueReadSchema]:
         return [c for c in self.by_id.values() if c.product_id == product_id]
+
+    async def delete_by_product(self, product_id: UUID) -> int:
+        to_delete = [cid for cid, ch in self.by_id.items() if ch.product_id == product_id]
+        for cid in to_delete:
+            del self.by_id[cid]
+        return len(to_delete)
+
+
+class FakeSKURepositoryForProducts:
+    """Минимальный фейк SKURepository для edit-product-тестов (нужен count_by_product)."""
+
+    def __init__(self):
+        self.count_by_product_overrides: dict[UUID, int] = {}
+
+    async def count_by_product(self, product_id: UUID) -> int:
+        return self.count_by_product_overrides.get(product_id, 0)
+
+
+class FakeOutboxRepository:
+    """Фейк outbox-репозитория для тестов use-case."""
+
+    def __init__(self):
+        self.enqueued: list[OutboxEnqueueSchema] = []
+
+    async def enqueue_in_new_transaction(self, data: OutboxEnqueueSchema) -> Any:
+        self.enqueued.append(data)
+        return None

@@ -32,6 +32,9 @@ from .request import (
     ProductCreateRequestSchema as ProductCreateRequestSchema,
 )
 from .request import (
+    ProductEditRequestSchema as ProductEditRequestSchema,
+)
+from .request import (
     ProductImageCreateRequestSchema as ProductImageCreateRequestSchema,
 )
 from .response import (

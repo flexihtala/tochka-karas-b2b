@@ -1,2 +1,4 @@
 from .create_product import CreateProductUseCase as CreateProductUseCase
+from .delete_product import DeleteProductUseCase as DeleteProductUseCase
+from .edit_product import EditProductUseCase as EditProductUseCase
 from .get_product import GetProductUseCase as GetProductUseCase
