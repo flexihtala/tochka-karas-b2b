@@ -21,11 +21,11 @@ from apps.catalog.routers import router as catalog_router
 from apps.catalog.schemas.response import CatalogProductDetailResponseSchema
 from apps.catalog.use_cases import GetProductUseCase
 from apps.errors import setup_error_handlers
-from tests.catalog.fakes import MockTransportServiceClient, make_handler
+from tests.catalog.fakes import make_handler, make_service_client
 
 
 def _b2b_client(handler) -> B2BCatalogClient:
-    return B2BCatalogClient(service_client=MockTransportServiceClient(handler=handler))
+    return B2BCatalogClient(service_client=make_service_client(handler=handler))
 
 
 @pytest.mark.anyio
