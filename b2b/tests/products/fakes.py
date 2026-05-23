@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from apps.categories.schemas import CategoryCreateSchema, CategoryReadSchema, CategoryUpdateSchema
+from apps.products.enums import ProductStatus
 from apps.products.schemas.db import (
     CharacteristicValueCreateSchema,
     CharacteristicValueReadSchema,
@@ -9,7 +11,9 @@ from apps.products.schemas.db import (
     ProductImageCreateSchema,
     ProductImageReadSchema,
     ProductReadSchema,
+    ProductUpdateSchema,
 )
+from shared.outbox import OutboxEnqueueSchema
 
 
 class FakeCategoryRepository:
@@ -56,6 +60,38 @@ class FakeProductRepository:
     def __init__(self):
         self.by_id: dict[UUID, ProductReadSchema] = {}
         self.created: list[ProductCreateSchema] = []
+        self.updated: list[ProductUpdateSchema] = []
+
+    def add(
+        self,
+        *,
+        id: UUID | None = None,
+        seller_id: UUID | None = None,
+        category_id: UUID | None = None,
+        title: str = 'iPhone 15 Pro Max',
+        slug: str = 'iphone-15-pro-max',
+        description: str = 'Флагман Apple',
+        status: ProductStatus = ProductStatus.CREATED,
+        deleted: bool = False,
+    ) -> UUID:
+        product_id = id or uuid4()
+        now = datetime.now(UTC)
+        product = ProductReadSchema(
+            id=product_id,
+            seller_id=seller_id or uuid4(),
+            category_id=category_id or uuid4(),
+            title=title,
+            slug=slug,
+            description=description,
+            status=status,
+            deleted=deleted,
+            blocking_reason_id=None,
+            moderator_comment=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self.by_id[product_id] = product
+        return product_id
 
     async def create(self, data: ProductCreateSchema) -> ProductReadSchema:
         self.created.append(data)
@@ -80,6 +116,51 @@ class FakeProductRepository:
 
     async def get_or_none(self, id_: UUID) -> ProductReadSchema | None:
         return self.by_id.get(id_)
+
+    async def update(self, data: ProductUpdateSchema) -> ProductReadSchema | None:
+        self.updated.append(data)
+        product = self.by_id.get(data.id)
+        if product is None:
+            return None
+        updates = data.model_dump(exclude_unset=True, exclude={'id'})
+        merged = product.model_copy(update=updates)
+        self.by_id[data.id] = merged
+        return merged
+
+    async def list_by_seller(self, seller_id: UUID, *, include_deleted: bool = False) -> list[ProductReadSchema]:
+        rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
+        if not include_deleted:
+            rows = [p for p in rows if not p.deleted]
+        return rows
+
+
+class FakeSKURepositoryForDelete:
+    """Минималистичный SKU-фейк для тестов удаления товара.
+
+    Поддерживает только `list_ids_by_product` — единственный вызов из DeleteProductUseCase.
+    """
+
+    def __init__(self):
+        self.ids_by_product: dict[UUID, list[UUID]] = {}
+
+    def add_sku(self, product_id: UUID, sku_id: UUID | None = None) -> UUID:
+        new_id = sku_id or uuid4()
+        self.ids_by_product.setdefault(product_id, []).append(new_id)
+        return new_id
+
+    async def list_ids_by_product(self, product_id: UUID) -> list[UUID]:
+        return list(self.ids_by_product.get(product_id, []))
+
+
+class FakeOutboxRepository:
+    """Фейк b2b outbox-репозитория. Захватывает enqueue-вызовы для assertions."""
+
+    def __init__(self):
+        self.enqueued: list[OutboxEnqueueSchema] = []
+
+    async def enqueue_in_new_transaction(self, data: OutboxEnqueueSchema) -> Any:
+        self.enqueued.append(data)
+        return None
 
 
 class FakeProductImageRepository:
