@@ -8,7 +8,7 @@ requires-python = ">=3.14"
 package = false
 
 [tool.uv.workspace]
-members = ["shared", "b2b"]
+members = ["shared", "b2b", "b2c"]
 
 [tool.ruff]
 line-length = 120
