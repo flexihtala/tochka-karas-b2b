@@ -24,7 +24,12 @@ from apps.products.schemas.response import (
     ProductImageResponseSchema,
     ProductResponseSchema,
 )
-from apps.products.use_cases import CreateProductUseCase, DeleteProductUseCase, EditProductUseCase
+from apps.products.use_cases import (
+    CreateProductUseCase,
+    DeleteProductUseCase,
+    EditProductUseCase,
+    GetProductUseCase,
+)
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
@@ -70,6 +75,45 @@ class StubCreateProductUseCase:
         return self.response
 
 
+class StubGetProductUseCase:
+    def __init__(self):
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.error: Exception | None = None
+        now = datetime.now(UTC)
+        product_id = uuid4()
+        self.response = ProductResponseSchema(
+            id=product_id,
+            seller_id=uuid4(),
+            category_id=uuid4(),
+            title='iPhone 15 Pro Max',
+            slug='iphone-15-pro-max',
+            description='Флагман Apple',
+            status=ProductStatus.MODERATED,
+            deleted=False,
+            blocking_reason_id=None,
+            moderator_comment=None,
+            images=[
+                ProductImageResponseSchema(id=uuid4(), url='/s3/iphone15-front.jpg', ordering=0),
+            ],
+            characteristics=[
+                CharacteristicResponseSchema(id=uuid4(), name='Бренд', value='Apple'),
+            ],
+            skus=[],
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def __call__(
+        self,
+        product_id: UUID,
+        current_user: AuthenticatedUserSchema,
+    ) -> ProductResponseSchema:
+        self.calls.append((product_id, current_user))
+        if self.error:
+            raise self.error
+        return self.response
+
+
 class StubEditProductUseCase:
     def __init__(self):
         self.calls: list[tuple[UUID, ProductEditRequestSchema, AuthenticatedUserSchema]] = []
@@ -99,17 +143,20 @@ class StubDeleteProductUseCase:
             raise self.error
 
 
+
 class ProductsRouteProvider(Provider):
     def __init__(
         self,
         create_stub: StubCreateProductUseCase,
         edit_stub: StubEditProductUseCase,
         delete_stub: StubDeleteProductUseCase,
+        get_stub: StubGetProductUseCase | None = None,
     ):
         super().__init__()
         self.create_stub = create_stub
         self.edit_stub = edit_stub
         self.delete_stub = delete_stub
+        self.get_stub = get_stub or StubGetProductUseCase()
 
     @provide(scope=Scope.REQUEST)
     def get_create_product_use_case(self) -> CreateProductUseCase:
@@ -122,6 +169,10 @@ class ProductsRouteProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def get_delete_product_use_case(self) -> DeleteProductUseCase:
         return self.delete_stub
+
+    @provide(scope=Scope.REQUEST)
+    def get_get_product_use_case(self) -> GetProductUseCase:
+        return self.get_stub
 
 
 class AuthInjectingMiddleware:
@@ -145,6 +196,7 @@ def _make_app(
     user: AuthenticatedUserSchema | None,
     edit_stub: StubEditProductUseCase | None = None,
     delete_stub: StubDeleteProductUseCase | None = None,
+    get_stub: StubGetProductUseCase | None = None,
 ) -> FastAPI:
     """Создаёт минимальное FastAPI приложение с роутером products.
 
@@ -167,6 +219,7 @@ def _make_app(
             create_stub,
             edit_stub or StubEditProductUseCase(),
             delete_stub or StubDeleteProductUseCase(),
+            get_stub,
         ),
     )
     setup_dishka(container, app)
@@ -210,7 +263,8 @@ def test_create_product_endpoint_returns_201(stub: StubCreateProductUseCase):
     assert response.status_code == 201
     body = response.json()
     assert body['status'] == ProductStatus.CREATED.value
-    assert body['skus'] == []
+    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
+    assert isinstance(body['skus'], list)
     assert body['deleted'] is False
     assert body['title'] == 'iPhone 15 Pro Max'
     assert len(body['images']) == 1
@@ -275,6 +329,94 @@ def test_create_product_missing_images_returns_400(stub: StubCreateProductUseCas
 
     assert response.status_code == 400
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Требуется минимум одно изображение'}
+
+
+# ─── GET /api/v1/products/{id} ───
+
+
+@pytest.fixture
+def get_stub() -> StubGetProductUseCase:
+    return StubGetProductUseCase()
+
+
+def test_get_product_endpoint_returns_200(stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, get_stub=get_stub))
+    product_id = uuid4()
+
+    response = client.get(f'/api/v1/products/{product_id}')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['id'] == str(get_stub.response.id)
+    assert body['status'] == ProductStatus.MODERATED.value
+    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
+    assert isinstance(body['skus'], list)
+    assert len(get_stub.calls) == 1
+    passed_id, current_user = get_stub.calls[0]
+    assert passed_id == product_id
+    assert current_user.id == user.id
+
+
+def test_get_product_endpoint_unauthorized_returns_401(stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase):
+    client = TestClient(_make_app(stub, user=None, get_stub=get_stub))
+
+    response = client.get(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 401
+    assert response.json() == {'code': 'UNAUTHORIZED', 'message': 'Unauthorized'}
+    assert get_stub.calls == []
+
+
+def test_get_product_endpoint_non_seller_returns_403(stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(stub, user, get_stub=get_stub))
+
+    response = client.get(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 403
+    assert response.json()['code'] == 'FORBIDDEN'
+    assert get_stub.calls == []
+
+
+def test_get_product_endpoint_others_product_returns_404(
+    stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase
+):
+    """Чужой товар (use-case бросает ProductNotFoundError) → 404 NOT_FOUND.
+
+    Канон: НЕ 403, чтобы не раскрыть факт существования чужого товара.
+    """
+    get_stub.error = ProductNotFoundError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, get_stub=get_stub))
+
+    response = client.get(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 404
+    assert response.json() == {'code': 'NOT_FOUND', 'message': 'Product not found'}
+
+
+def test_get_product_endpoint_not_found_returns_404(stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase):
+    get_stub.error = ProductNotFoundError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, get_stub=get_stub))
+
+    response = client.get(f'/api/v1/products/{uuid4()}')
+
+    assert response.status_code == 404
+    assert response.json() == {'code': 'NOT_FOUND', 'message': 'Product not found'}
+
+
+def test_get_product_endpoint_invalid_uuid_returns_400(stub: StubCreateProductUseCase, get_stub: StubGetProductUseCase):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, get_stub=get_stub))
+
+    response = client.get('/api/v1/products/not-a-uuid')
+
+    assert response.status_code == 400
+    assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Невалидное тело запроса'}
+    assert get_stub.calls == []
+
 
 
 # ===========================================================================

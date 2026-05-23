@@ -71,10 +71,12 @@ class FakeProductRepository:
         title: str = 'iPhone 15 Pro Max',
         slug: str = 'iphone-15-pro-max',
         description: str = 'Флагман Apple',
-        status: ProductStatus = ProductStatus.CREATED,
+        status: ProductStatus = ProductStatus.MODERATED,
         deleted: bool = False,
-    ) -> UUID:
-        """Используется в edit-тестах: посадить уже существующий продукт."""
+        blocking_reason_id: UUID | None = None,
+        moderator_comment: str | None = None,
+    ) -> ProductReadSchema:
+        """Посадить уже существующий продукт (используется в get/edit/delete-тестах)."""
         product_id = id or uuid4()
         now = datetime.now(UTC)
         product = ProductReadSchema(
@@ -86,13 +88,13 @@ class FakeProductRepository:
             description=description,
             status=status,
             deleted=deleted,
-            blocking_reason_id=None,
-            moderator_comment=None,
+            blocking_reason_id=blocking_reason_id,
+            moderator_comment=moderator_comment,
             created_at=now,
             updated_at=now,
         )
         self.by_id[product_id] = product
-        return product_id
+        return product
 
     async def create(self, data: ProductCreateSchema) -> ProductReadSchema:
         self.created.append(data)
@@ -158,8 +160,15 @@ class FakeProductImageRepository:
         self.created: list[ProductImageCreateSchema] = []
         self.by_id: dict[UUID, ProductImageReadSchema] = {}
 
-    def add(self, *, product_id: UUID, url: str, ordering: int = 0) -> UUID:
-        image_id = uuid4()
+    def add(
+        self,
+        *,
+        product_id: UUID,
+        url: str = '/s3/image.jpg',
+        ordering: int = 0,
+        id: UUID | None = None,
+    ) -> ProductImageReadSchema:
+        image_id = id or uuid4()
         now = datetime.now(UTC)
         image = ProductImageReadSchema(
             id=image_id,
@@ -170,7 +179,7 @@ class FakeProductImageRepository:
             updated_at=now,
         )
         self.by_id[image_id] = image
-        return image_id
+        return image
 
     async def create(self, data: ProductImageCreateSchema) -> ProductImageReadSchema:
         self.created.append(data)
@@ -205,19 +214,26 @@ class FakeCharacteristicValueRepository:
         self.created: list[CharacteristicValueCreateSchema] = []
         self.by_id: dict[UUID, CharacteristicValueReadSchema] = {}
 
-    def add(self, *, product_id: UUID, name: str, value: str) -> UUID:
-        ch_id = uuid4()
+    def add(
+        self,
+        *,
+        product_id: UUID,
+        name: str = 'Бренд',
+        value: str = 'Apple',
+        id: UUID | None = None,
+    ) -> CharacteristicValueReadSchema:
+        characteristic_id = id or uuid4()
         now = datetime.now(UTC)
-        ch = CharacteristicValueReadSchema(
-            id=ch_id,
+        characteristic = CharacteristicValueReadSchema(
+            id=characteristic_id,
             product_id=product_id,
             name=name,
             value=value,
             created_at=now,
             updated_at=now,
         )
-        self.by_id[ch_id] = ch
-        return ch_id
+        self.by_id[characteristic_id] = characteristic
+        return characteristic
 
     async def create(self, data: CharacteristicValueCreateSchema) -> CharacteristicValueReadSchema:
         self.created.append(data)

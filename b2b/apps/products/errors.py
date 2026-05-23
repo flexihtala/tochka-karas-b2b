@@ -21,6 +21,12 @@ class ImagesRequiredError(ProductError):
 
 
 class ProductNotFoundError(ProductError):
+    """Возвращается:
+    - когда товар не существует;
+    - когда товар принадлежит другому продавцу (canon: НЕ 403 -- не раскрываем
+      факт существования чужого товара, иначе IDOR-by-discovery).
+    """
+
     def __init__(self, message: str = 'Product not found'):
         super().__init__('NOT_FOUND', message, 404)
 

@@ -41,7 +41,7 @@ async def test_delete_sets_deleted_true():
     """Удаление выставляет product.deleted = True (мягкое удаление, строка остаётся)."""
     products = FakeProductRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False).id
 
     use_case = make_use_case(product_repository=products)
 
@@ -62,7 +62,7 @@ async def test_delete_emits_event_to_moderation():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 
@@ -85,7 +85,7 @@ async def test_delete_emits_product_deleted_to_b2c():
     skus = FakeSKURepositoryForDelete()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED).id
     sku_id_1 = skus.add_sku(product_id)
     sku_id_2 = skus.add_sku(product_id)
 
@@ -109,7 +109,7 @@ async def test_delete_emits_both_cascading_events():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 
@@ -126,7 +126,7 @@ async def test_delete_already_deleted_returns_400():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, deleted=True)
+    product_id = products.add(seller_id=user.id, deleted=True).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 
@@ -148,8 +148,8 @@ async def test_deleted_product_not_in_seller_list():
     """
     products = FakeProductRepository()
     user = make_authenticated_user()
-    visible_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False)
-    to_delete_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False)
+    visible_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False).id
+    to_delete_id = products.add(seller_id=user.id, status=ProductStatus.CREATED, deleted=False).id
 
     use_case = make_use_case(product_repository=products)
     await use_case(to_delete_id, user)
@@ -172,7 +172,7 @@ async def test_delete_others_product_returns_403():
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
     another_seller_id = uuid4()
-    product_id = products.add(seller_id=another_seller_id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=another_seller_id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 
@@ -193,7 +193,7 @@ async def test_delete_hard_blocked_returns_403():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.HARD_BLOCKED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.HARD_BLOCKED).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 
@@ -225,7 +225,7 @@ async def test_delete_with_no_skus_still_emits_b2c_event_with_empty_list():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_authenticated_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(product_repository=products, outbox_repository=outbox)
 

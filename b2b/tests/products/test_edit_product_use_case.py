@@ -97,7 +97,7 @@ async def test_edit_moderated_product_returns_to_on_moderation():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED).id
 
     use_case = make_use_case(products=products, outbox=outbox)
 
@@ -123,7 +123,7 @@ async def test_edit_blocked_product_returns_to_on_moderation():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.BLOCKED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.BLOCKED).id
 
     use_case = make_use_case(products=products, outbox=outbox)
 
@@ -142,7 +142,7 @@ async def test_edit_hard_blocked_returns_403():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.HARD_BLOCKED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.HARD_BLOCKED).id
 
     use_case = make_use_case(products=products, outbox=outbox)
 
@@ -162,7 +162,7 @@ async def test_edit_others_product_returns_403():
     products = FakeProductRepository()
     user = make_user()
     other_seller_id = uuid4()
-    product_id = products.add(seller_id=other_seller_id, status=ProductStatus.MODERATED)
+    product_id = products.add(seller_id=other_seller_id, status=ProductStatus.MODERATED).id
 
     use_case = make_use_case(products=products)
 
@@ -187,7 +187,7 @@ async def test_edit_created_product_no_status_transition_no_event():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(products=products, outbox=outbox)
 
@@ -204,7 +204,7 @@ async def test_edit_on_moderation_product_no_status_transition_no_event():
     products = FakeProductRepository()
     outbox = FakeOutboxRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.ON_MODERATION)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.ON_MODERATION).id
 
     use_case = make_use_case(products=products, outbox=outbox)
 
@@ -232,7 +232,7 @@ async def test_edit_with_images_replaces_atomically():
     products = FakeProductRepository()
     images = FakeProductImageRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
     # Старые изображения
     images.add(product_id=product_id, url='/old1.jpg', ordering=0)
     images.add(product_id=product_id, url='/old2.jpg', ordering=1)
@@ -257,7 +257,7 @@ async def test_edit_with_empty_images_returns_400():
     """images=[] → ImagesRequiredError (минимум одно изображение)."""
     products = FakeProductRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(products=products)
 
@@ -271,7 +271,7 @@ async def test_edit_with_images_not_set_preserves_existing():
     products = FakeProductRepository()
     images = FakeProductImageRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
     images.add(product_id=product_id, url='/keep.jpg', ordering=0)
 
     use_case = make_use_case(products=products, images=images)
@@ -288,7 +288,7 @@ async def test_edit_with_characteristics_replaces_atomically():
     products = FakeProductRepository()
     characteristics = FakeCharacteristicValueRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
     characteristics.add(product_id=product_id, name='Бренд', value='Samsung')
 
     use_case = make_use_case(products=products, characteristics=characteristics)
@@ -309,7 +309,7 @@ async def test_edit_with_invalid_category_returns_400():
     """category_id, которой нет в справочнике, → CategoryNotFoundError (400)."""
     products = FakeProductRepository()
     user = make_user()
-    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
+    product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED).id
 
     use_case = make_use_case(products=products)  # categories пустой
 
@@ -331,7 +331,7 @@ async def test_edit_outbox_event_payload_contains_full_product_snapshot():
         status=ProductStatus.MODERATED,
         title='Old title',
         slug='iphone-15',
-    )
+    ).id
     images.add(product_id=product_id, url='/old.jpg', ordering=0)
     characteristics.add(product_id=product_id, name='Бренд', value='Apple')
     skus.count_by_product_overrides[product_id] = 2

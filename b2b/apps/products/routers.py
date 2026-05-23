@@ -1,4 +1,4 @@
-import uuid
+from uuid import UUID
 
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
@@ -11,6 +11,7 @@ from apps.products.use_cases import (
     CreateProductUseCase,
     DeleteProductUseCase,
     EditProductUseCase,
+    GetProductUseCase,
 )
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
@@ -19,6 +20,13 @@ router = APIRouter(prefix='/products')
 
 error_responses = {
     400: {'model': ErrorResponseSchema},
+    401: {'model': ErrorResponseSchema},
+    403: {'model': ErrorResponseSchema},
+    404: {'model': ErrorResponseSchema},
+}
+
+
+get_error_responses = {
     401: {'model': ErrorResponseSchema},
     403: {'model': ErrorResponseSchema},
     404: {'model': ErrorResponseSchema},
@@ -40,6 +48,26 @@ async def create_product(
     return await use_case(data, current_user)
 
 
+@router.get(
+    '/{product_id}',
+    status_code=status.HTTP_200_OK,
+    response_model=ProductResponseSchema,
+    responses=get_error_responses,
+)
+@inject
+async def get_product(
+    product_id: UUID,
+    use_case: FromDishka[GetProductUseCase],
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.SELLER)),
+) -> ProductResponseSchema:
+    """Seller cabinet: карточка товара продавца.
+
+    Чужой товар → 404 (НЕ 403): см. canon b2b-flows.md#view-product, защита
+    от IDOR-by-discovery.
+    """
+    return await use_case(product_id, current_user)
+
+
 @router.patch(
     '/{product_id}',
     status_code=status.HTTP_200_OK,
@@ -48,7 +76,7 @@ async def create_product(
 )
 @inject
 async def edit_product(
-    product_id: uuid.UUID,
+    product_id: UUID,
     data: ProductEditRequestSchema,
     use_case: FromDishka[EditProductUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.SELLER)),
@@ -63,7 +91,7 @@ async def edit_product(
 )
 @inject
 async def delete_product(
-    product_id: uuid.UUID,
+    product_id: UUID,
     use_case: FromDishka[DeleteProductUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.SELLER)),
 ) -> Response:
