@@ -7,7 +7,7 @@
 from dishka import Provider, Scope, provide
 
 from apps.catalog.clients import B2BCatalogClient
-from apps.catalog.use_cases import GetFacetsUseCase, ListProductsUseCase
+from apps.catalog.use_cases import GetFacetsUseCase, GetProductUseCase, ListProductsUseCase
 from settings import B2CSettings
 from shared.http_clients import ServiceClient
 
@@ -15,6 +15,7 @@ from shared.http_clients import ServiceClient
 class CatalogProvider(Provider):
     list_products_use_case = provide(ListProductsUseCase, scope=Scope.REQUEST)
     get_facets_use_case = provide(GetFacetsUseCase, scope=Scope.REQUEST)
+    get_product_use_case = provide(GetProductUseCase, scope=Scope.REQUEST)
 
     @provide(scope=Scope.APP)
     def get_b2b_service_client(self, settings: B2CSettings) -> ServiceClient:
