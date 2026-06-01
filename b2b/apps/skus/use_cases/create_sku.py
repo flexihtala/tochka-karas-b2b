@@ -91,7 +91,7 @@ class CreateSKUUseCase:
                 cost_price=data.cost_price,
                 discount=data.discount,
                 article=data.article,
-                active_quantity=data.stock_quantity,
+                active_quantity=0,
                 reserved_quantity=0,
             )
         )

@@ -19,7 +19,6 @@ class SKUCreateRequestSchema(BaseModel):
     price: int = Field(ge=0)
     cost_price: int | None = Field(default=None, ge=0)
     discount: int = Field(default=0, ge=0)
-    stock_quantity: int = Field(default=0, ge=0)
     article: str | None = Field(default=None, max_length=255)
     images: list[SKUImageCreateRequestSchema] = Field(default_factory=list)
     characteristics: list[SKUCharacteristicRequestSchema] = Field(default_factory=list)
