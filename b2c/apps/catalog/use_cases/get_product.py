@@ -1,4 +1,4 @@
-"""US-CAT-03: GET /api/v1/products/{id} — карточка товара для покупателя.
+"""US-CAT-03: GET /api/v1/catalog/products/{id} — карточка товара для покупателя.
 
 Проксирует к B2B `/api/v1/catalog/products/{id}` (B2C-view: без cost_price и
 reserved_quantity).
@@ -28,7 +28,7 @@ from shared.http_clients import ServiceClientError
 
 
 class GetProductUseCase:
-    """GET /api/v1/products/{id} — карточка товара для B2C."""
+    """GET /api/v1/catalog/products/{id} — карточка товара для B2C."""
 
     def __init__(self, b2b_client: B2BCatalogClient):
         self.b2b_client = b2b_client

@@ -74,7 +74,7 @@ async def get_facets(
 
 
 @router.get(
-    '/products/{product_id}',
+    '/catalog/products/{product_id}',
     response_model=CatalogProductDetailResponseSchema,
     responses=error_responses,
 )
