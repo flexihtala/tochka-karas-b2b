@@ -131,7 +131,6 @@ def _request_payload(product_id: UUID | None = None) -> dict:
         'price': 12_999_000,
         'cost_price': 9_500_000,
         'discount': 0,
-        'stock_quantity': 0,
         'images': [
             {'url': '/s3/iphone15-black-256.jpg', 'ordering': 0},
         ],

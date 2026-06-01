@@ -40,7 +40,6 @@ def make_request(
     price: int = 12_999_000,
     cost_price: int | None = 9_500_000,
     discount: int = 0,
-    stock_quantity: int = 0,
     article: str | None = None,
     images: list[SKUImageCreateRequestSchema] | None = None,
     characteristics: list[SKUCharacteristicRequestSchema] | None = None,
@@ -51,7 +50,6 @@ def make_request(
         price=price,
         cost_price=cost_price,
         discount=discount,
-        stock_quantity=stock_quantity,
         article=article,
         images=images
         if images is not None
@@ -238,17 +236,17 @@ async def test_product_owned_by_another_seller_returns_403():
 
 
 @pytest.mark.anyio
-async def test_response_contains_active_quantity_from_stock_and_zero_reserved():
-    """active_quantity = stock_quantity, reserved_quantity = 0."""
+async def test_response_contains_active_quantity_zero_and_zero_reserved():
+    """New SKU is created with active_quantity = 0 and reserved_quantity = 0."""
     products = FakeProductRepositoryReadable()
     user = make_authenticated_user()
     product_id = products.add(seller_id=user.id, status=ProductStatus.CREATED)
 
     use_case = make_use_case(product_repository=products)
 
-    response = await use_case(make_request(product_id=product_id, stock_quantity=10), user)
+    response = await use_case(make_request(product_id=product_id), user)
 
-    assert response.active_quantity == 10
+    assert response.active_quantity == 0
     assert response.reserved_quantity == 0
 
 
@@ -261,10 +259,9 @@ async def test_sku_response_includes_stock_quantity():
 
     use_case = make_use_case(product_repository=products)
 
-    response = await use_case(make_request(product_id=product_id, stock_quantity=42), user)
+    response = await use_case(make_request(product_id=product_id), user)
 
-    # At creation: reserved_quantity = 0, so stock_quantity == active_quantity == request.stock_quantity.
-    assert response.stock_quantity == 42
+    assert response.stock_quantity == 0
     assert response.stock_quantity == response.active_quantity + response.reserved_quantity
 
 
