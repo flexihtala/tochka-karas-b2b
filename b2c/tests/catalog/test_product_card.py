@@ -467,7 +467,7 @@ def test_get_product_router_returns_200():
     )
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{product_id}')
+    response = client.get(f'/api/v1/catalog/products/{product_id}')
 
     assert response.status_code == 200
     body = response.json()
@@ -484,7 +484,7 @@ def test_get_product_router_returns_404():
     stub.error = ProductNotFoundError()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{uuid4()}')
+    response = client.get(f'/api/v1/catalog/products/{uuid4()}')
 
     assert response.status_code == 404
     body = response.json()
@@ -496,7 +496,7 @@ def test_get_product_router_502_on_b2b_unavailable():
     stub.error = CatalogUnavailableError()
     client = TestClient(_make_app(stub))
 
-    response = client.get(f'/api/v1/products/{uuid4()}')
+    response = client.get(f'/api/v1/catalog/products/{uuid4()}')
 
     assert response.status_code == 502
 
@@ -506,7 +506,7 @@ def test_get_product_invalid_uuid_returns_422():
     stub = StubGetProduct()
     client = TestClient(_make_app(stub))
 
-    response = client.get('/api/v1/products/not-a-uuid')
+    response = client.get('/api/v1/catalog/products/not-a-uuid')
 
     # FastAPI 422 на path-валидации — это стандартное поведение, не наша ошибка.
     assert response.status_code in (400, 422)
