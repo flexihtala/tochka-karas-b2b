@@ -304,6 +304,47 @@ class FakePublicCatalogRepository:
         similar.sort(key=lambda p: str(p.id))
         return similar[:limit]
 
+    async def aggregate_facets(
+        self,
+        *,
+        category_id: UUID | None = None,
+        search: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        seller_id: UUID | None = None,
+    ) -> tuple[list[tuple[str, str, int]], tuple[int, int]]:
+        """Фейк агрегации фасетов: те же условия видимости/фильтры, что и list_short.
+
+        Возвращает (name, value, count) по характеристикам видимых отфильтрованных
+        товаров + диапазон (min, max) минимальной цены SKU.
+        """
+        matched = [
+            p
+            for p in self.products
+            if self._is_visible(p)
+            and self._matches_filters(
+                p,
+                category_id=category_id,
+                search=search,
+                min_price=min_price,
+                max_price=max_price,
+                seller_id=seller_id,
+                filters=None,
+            )
+        ]
+
+        counts: dict[tuple[str, str], int] = {}
+        for product in matched:
+            for ch in product.characteristics:
+                counts[(ch.name, ch.value)] = counts.get((ch.name, ch.value), 0) + 1
+        # Порядок как у реального репозитория: по name asc, затем count desc.
+        rows = sorted(((name, value, count) for (name, value), count in counts.items()), key=lambda r: (r[0], -r[2]))
+
+        prices = [_visible_min_price(p) for p in matched]
+        prices = [price for price in prices if price > 0]
+        price_range = (min(prices), max(prices)) if prices else (0, 0)
+        return rows, price_range
+
     async def get_public_sku(self, sku_id: UUID) -> FakeSKU | None:
         for product in self.products:
             for sku in product.skus:

@@ -38,12 +38,13 @@ async def test_product_card_returns_full_data_with_skus():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            # B2B отдаёт ProductPublicResponse: title (не name) + skus[].active_quantity.
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
                     'slug': 'iphone-15-pro-max',
-                    'name': 'iPhone 15 Pro Max',
+                    'title': 'iPhone 15 Pro Max',
                     'description': 'Флагман Apple',
                     'status': 'MODERATED',
                     'images': [
@@ -59,7 +60,7 @@ async def test_product_card_returns_full_data_with_skus():
                             'name': '256GB Black',
                             'price': 12999000,
                             'discount': 0,
-                            'available_quantity': 10,
+                            'active_quantity': 10,
                             'images': [{'id': str(uuid4()), 'url': '/s3/black.jpg', 'ordering': 0}],
                             'characteristics': [
                                 {'name': 'Цвет', 'value': 'Чёрный'},
@@ -71,7 +72,7 @@ async def test_product_card_returns_full_data_with_skus():
                             'name': '256GB White',
                             'price': 12999000,
                             'discount': 500000,
-                            'available_quantity': 3,
+                            'active_quantity': 3,
                             'images': [{'id': str(uuid4()), 'url': '/s3/white.jpg', 'ordering': 0}],
                             'characteristics': [
                                 {'name': 'Цвет', 'value': 'Белый'},
@@ -118,7 +119,7 @@ async def test_cost_price_absent_in_response():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
@@ -198,7 +199,7 @@ async def test_sku_with_zero_available_quantity_has_in_stock_false():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
@@ -237,7 +238,7 @@ async def test_min_price_returns_lowest_sku_price():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
@@ -296,7 +297,7 @@ async def test_has_stock_false_when_no_skus_have_stock():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
@@ -350,7 +351,7 @@ async def test_image_id_propagated_from_b2b():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),
@@ -383,7 +384,7 @@ async def test_legacy_active_quantity_accepted_for_backward_compat():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}': (
+            f'GET /api/v1/public/products/{product_id}': (
                 200,
                 {
                     'id': str(product_id),

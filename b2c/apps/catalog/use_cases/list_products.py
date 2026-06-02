@@ -33,7 +33,11 @@ from typing import Any
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import CatalogUnavailableError, InvalidSearchError, InvalidSortError
 from apps.catalog.schemas.request import CatalogFilterSchema
-from apps.catalog.schemas.response import CatalogPaginatedResponseSchema
+from apps.catalog.schemas.response import (
+    CatalogPaginatedResponseSchema,
+    CatalogProductCardSchema,
+    ImageRefSchema,
+)
 from shared.http_clients import ServiceClientError
 
 
@@ -105,7 +109,47 @@ class ListProductsUseCase:
         except Exception as exc:
             raise CatalogUnavailableError() from exc
 
-        return CatalogPaginatedResponseSchema.model_validate(payload)
+        return self._to_response(payload)
+
+    @staticmethod
+    def _to_response(payload: dict[str, Any]) -> CatalogPaginatedResponseSchema:
+        """Маппит B2B ProductPublicPaginatedResponse → B2C PaginatedCatalogProducts.
+
+        B2B-короткая карточка (ProductPublicShortResponse) → B2C CatalogProductCard:
+            name       ← title
+            min_price  ← min_price
+            has_stock  ← true (B2B листинг отдаёт только товары с active_quantity > 0,
+                         поэтому все попавшие в выдачу — в наличии)
+            images     ← [{id, url: cover_image, ordering: 0}] если cover_image, иначе []
+            slug       ← slug
+
+        У короткой карточки B2B нет отдельной сущности изображения с собственным id,
+        поэтому для единственной обложки используем id товара как стабильный id картинки
+        (ImageRef.id обязателен по спецификации b2c/openapi.yaml).
+        """
+        items_payload = payload.get('items') or []
+        items: list[CatalogProductCardSchema] = []
+        for item in items_payload:
+            cover_image = item.get('cover_image')
+            images: list[ImageRefSchema] = []
+            if cover_image:
+                images = [ImageRefSchema(id=item['id'], url=cover_image, ordering=0, is_main=True)]
+            items.append(
+                CatalogProductCardSchema(
+                    id=item['id'],
+                    name=item.get('title') or item.get('name') or '',
+                    slug=item.get('slug'),
+                    min_price=int(item.get('min_price', 0) or 0),
+                    has_stock=True,
+                    images=images,
+                )
+            )
+        return CatalogPaginatedResponseSchema(
+            items=items,
+            total_count=int(payload.get('total_count', 0) or 0),
+            limit=int(payload.get('limit', 0) or 0),
+            offset=int(payload.get('offset', 0) or 0),
+        )
 
     @staticmethod
     def _build_b2b_params(

@@ -24,6 +24,7 @@ from apps.auth.schemas import ErrorResponseSchema
 from apps.public.enums import CatalogSort
 from apps.public.schemas.request import BatchProductsRequestSchema
 from apps.public.schemas.response import (
+    FacetsPublicResponseSchema,
     ProductPublicPaginatedResponseSchema,
     ProductPublicResponseSchema,
     ProductPublicShortResponseSchema,
@@ -31,6 +32,7 @@ from apps.public.schemas.response import (
 )
 from apps.public.use_cases import (
     BatchProductsUseCase,
+    GetFacetsUseCase,
     GetPublicProductUseCase,
     GetPublicSKUUseCase,
     GetSimilarProductsUseCase,
@@ -106,6 +108,31 @@ async def list_catalog_products(
         sort=sort,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    '/facets',
+    status_code=status.HTTP_200_OK,
+    response_model=FacetsPublicResponseSchema,
+    responses=error_responses,
+    dependencies=[Depends(verify_b2c_to_b2b)],
+)
+@inject
+async def get_catalog_facets(
+    use_case: FromDishka[GetFacetsUseCase],
+    category_id: UUID | None = Query(default=None),
+    search: str | None = Query(default=None, min_length=3),
+    min_price: int | None = Query(default=None, ge=0),
+    max_price: int | None = Query(default=None, ge=0),
+    seller_id: UUID | None = Query(default=None),
+) -> FacetsPublicResponseSchema:
+    return await use_case(
+        category_id=category_id,
+        search=search,
+        min_price=min_price,
+        max_price=max_price,
+        seller_id=seller_id,
     )
 
 

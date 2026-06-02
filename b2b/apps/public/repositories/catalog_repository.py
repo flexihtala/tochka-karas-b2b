@@ -272,6 +272,71 @@ class PublicCatalogRepository:
             products.append(product)
         return products
 
+    async def aggregate_facets(
+        self,
+        *,
+        category_id: UUID | None = None,
+        search: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
+        seller_id: UUID | None = None,
+    ) -> tuple[list[tuple[str, str, int]], tuple[int, int]]:
+        """Считает фасеты по характеристикам + диапазон цен для видимых товаров.
+
+        Видимость: status == MODERATED, not deleted, есть SKU active_quantity > 0.
+        Дополнительно применяются переданные фильтры (как в list_short), чтобы
+        счётчики отражали текущий контекст выдачи.
+
+        Возвращает:
+            facets     — список (name, value, count): сколько РАЗНЫХ видимых товаров
+                         имеют характеристику name со значением value
+                         (GROUP BY name, value; COUNT(DISTINCT product_id)).
+            price_range — (min, max) минимальной цены видимых SKU по товарам выборки;
+                         (0, 0) если под фильтры не попал ни один товар.
+        """
+        visibility = _visibility_predicate()
+        min_price_expr = _min_price_subquery()
+
+        # Подзапрос: id видимых товаров под текущими фильтрами (без характеристик в
+        # самих фасетах — фасеты считаем по характеристикам этого набора).
+        visible_ids = select(Product.id).where(visibility)
+        visible_ids = self._apply_filters(
+            visible_ids,
+            category_id=category_id,
+            search=search,
+            min_price=min_price,
+            max_price=max_price,
+            seller_id=seller_id,
+            filters=None,
+        )
+        visible_ids_subq = visible_ids.subquery()
+
+        facets_query = (
+            select(
+                CharacteristicValue.name,
+                CharacteristicValue.value,
+                func.count(func.distinct(CharacteristicValue.product_id)).label('count'),
+            )
+            .where(CharacteristicValue.product_id.in_(select(visible_ids_subq.c.id)))
+            .group_by(CharacteristicValue.name, CharacteristicValue.value)
+            .order_by(CharacteristicValue.name.asc(), func.count(func.distinct(CharacteristicValue.product_id)).desc())
+        )
+
+        # Диапазон цен — min/max минимальной цены видимых SKU по тем же товарам.
+        price_query = select(
+            func.min(min_price_expr),
+            func.max(min_price_expr),
+        ).where(Product.id.in_(select(visible_ids_subq.c.id)))
+
+        async with self.session_manager.get_session() as session:
+            facet_rows = (await session.execute(facets_query)).all()
+            price_row = (await session.execute(price_query)).one()
+
+        facets = [(name, value, int(count)) for name, value, count in facet_rows]
+        price_min_val = int(price_row[0]) if price_row[0] is not None else 0
+        price_max_val = int(price_row[1]) if price_row[1] is not None else 0
+        return facets, (price_min_val, price_max_val)
+
     async def get_public_sku(self, sku_id: UUID) -> SKU | None:
         """SKU витрины (его товар должен быть видимым), иначе None."""
         # Алиас, чтобы проверка "есть SKU с остатком" не ссылалась на внешний SKU.

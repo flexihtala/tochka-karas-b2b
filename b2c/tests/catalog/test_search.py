@@ -29,28 +29,24 @@ def _client(handler) -> B2BCatalogClient:
 @pytest.mark.anyio
 async def test_search_returns_matching_products():
     product_id = uuid4()
-    image_id = uuid4()
     captured: list[httpx.Request] = []
 
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            # B2B отдаёт ProductPublicShortResponse (title/cover_image/...).
+            'GET /api/v1/public/products': (
                 200,
                 {
                     'items': [
                         {
                             'id': str(product_id),
-                            'name': 'Беспроводные наушники Sony',
+                            'title': 'Беспроводные наушники Sony',
+                            'slug': 'sony-headphones',
+                            'status': 'MODERATED',
+                            'category_id': str(uuid4()),
                             'min_price': 2999000,
-                            'has_stock': True,
-                            'images': [
-                                {
-                                    'id': str(image_id),
-                                    'url': 'https://x/h.jpg',
-                                    'ordering': 0,
-                                    'is_main': True,
-                                }
-                            ],
+                            'cover_image': 'https://x/h.jpg',
+                            'created_at': '2026-01-01T00:00:00Z',
                         }
                     ],
                     'total_count': 1,
@@ -105,7 +101,7 @@ async def test_special_chars_do_not_break_query():
     captured: list[httpx.Request] = []
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -127,7 +123,7 @@ async def test_special_chars_do_not_break_query():
 async def test_empty_results_returns_200():
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -147,7 +143,7 @@ async def test_search_whitespace_only_skips_search():
     captured: list[httpx.Request] = []
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -167,7 +163,7 @@ async def test_search_with_category_combined():
     captured: list[httpx.Request] = []
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
