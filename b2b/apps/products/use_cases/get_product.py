@@ -1,18 +1,34 @@
 from uuid import UUID
 
+from apps.products.enums import ProductStatus
 from apps.products.errors import ProductNotFoundError
 from apps.products.repositories import (
     CharacteristicValueRepository,
     ProductImageRepository,
     ProductRepository,
 )
+from apps.products.schemas.db import ProductReadSchema
 from apps.products.schemas.response import (
+    BlockingReasonSchema,
     CharacteristicResponseSchema,
+    FieldReportSchema,
+    ProductDetailResponseSchema,
     ProductImageResponseSchema,
-    ProductResponseSchema,
+)
+from apps.skus.repositories import (
+    SKUCharacteristicValueRepository,
+    SKUImageRepository,
+    SKURepository,
+)
+from apps.skus.schemas.response import (
+    SKUCharacteristicResponseSchema,
+    SKUImageResponseSchema,
     SKUResponseSchema,
 )
 from shared.auth_lib import AuthenticatedUserSchema
+
+#: Статусы, при которых товар считается заблокированным (флаг ``blocked`` в карточке).
+_BLOCKED_STATUSES = frozenset({ProductStatus.BLOCKED, ProductStatus.HARD_BLOCKED})
 
 
 class GetProductUseCase:
@@ -29,12 +45,15 @@ class GetProductUseCase:
       флаг ``deleted`` (отдельного query ?include_deleted не требуется: данные
       продавцу принадлежат, скрывать от него нет смысла; B2C-режим фильтрует
       такие товары в каталоге отдельно).
-    - BLOCKED товар собственный: ответ включает ``blocking_reason_id`` и
-      ``moderator_comment``. ``field_reports[]`` опущены в этой итерации —
-      модель ProductFieldReport ещё не добавлена; см. PR body.
-    - MODERATED товар: полный payload, в т.ч. cost_price/reserved_quantity на
-      уровне SKU. SKU-модели пока нет в main (PR #8) → ``skus`` подгружается
-      через ``_load_skus`` (placeholder-метод, возвращает [] до мерджа PR #8).
+    - Ответ — ``ProductDetailResponse`` (openapi): флаг ``blocked``, объект
+      ``blocking_reason`` ({id, title, comment}) и массив ``field_reports``.
+      ``blocking_reason`` непустой только для BLOCKED/HARD_BLOCKED товаров.
+      ``blocking_reason_title`` / ``field_reports`` заполняются flow модерации
+      (US-B2B-09, обработчик MODERATED/BLOCKED-событий); до этого момента
+      хранятся пустыми, и GET читает их как есть.
+    - MODERATED/любой товар: полный payload, в т.ч. cost_price/reserved_quantity
+      на уровне SKU. SKU подгружаются через ``_load_skus`` — полные seller-view
+      SKU с картинками и характеристиками.
 
     Авторизация роли (SELLER) выполняется в роутере через ``require_role``;
     use-case считает ``current_user`` уже валидированным.
@@ -45,40 +64,76 @@ class GetProductUseCase:
         product_repository: ProductRepository,
         image_repository: ProductImageRepository,
         characteristic_repository: CharacteristicValueRepository,
+        sku_repository: SKURepository,
+        sku_image_repository: SKUImageRepository,
+        sku_characteristic_repository: SKUCharacteristicValueRepository,
     ):
         self.product_repository = product_repository
         self.image_repository = image_repository
         self.characteristic_repository = characteristic_repository
+        self.sku_repository = sku_repository
+        self.sku_image_repository = sku_image_repository
+        self.sku_characteristic_repository = sku_characteristic_repository
 
     async def _load_skus(self, product_id: UUID) -> list[SKUResponseSchema]:
-        """Загружает список SKU для товара.
+        """Загружает полные SKU товара (seller-view) с картинками и характеристиками.
 
-        Placeholder: SKU-модель пока не в main (живёт в открытом PR #8,
-        US-B2B-02). После мерджа PR #8 здесь будет:
-
-            sku_entities = await self.sku_repository.list_by_product(product_id)
-            return [
+        Для каждого SKU дополнительно подтягиваются его изображения и
+        характеристики из соответствующих репозиториев. ``stock_quantity`` —
+        derived-свойство SKU (active + reserved), уже посчитано в read-схеме.
+        """
+        skus = await self.sku_repository.list_full_by_product(product_id)
+        result: list[SKUResponseSchema] = []
+        for sku in skus:
+            images = await self.sku_image_repository.list_by_sku(sku.id)
+            characteristics = await self.sku_characteristic_repository.list_by_sku(sku.id)
+            result.append(
                 SKUResponseSchema(
                     id=sku.id,
+                    product_id=sku.product_id,
+                    name=sku.name,
+                    price=sku.price,
+                    discount=sku.discount,
                     cost_price=sku.cost_price,
+                    stock_quantity=sku.stock_quantity,
+                    active_quantity=sku.active_quantity,
                     reserved_quantity=sku.reserved_quantity,
-                    ...
+                    article=sku.article,
+                    images=[
+                        SKUImageResponseSchema(id=image.id, url=image.url, ordering=image.ordering) for image in images
+                    ],
+                    characteristics=[
+                        SKUCharacteristicResponseSchema(id=c.id, name=c.name, value=c.value) for c in characteristics
+                    ],
+                    created_at=sku.created_at,
+                    updated_at=sku.updated_at,
                 )
-                for sku in sku_entities
-            ]
+            )
+        return result
 
-        Метод выделен отдельно, чтобы:
-        1) не lock'ать тесты на конкретное значение ``skus`` (см. PR #9 review);
-        2) после мерджа US-B2B-02 правка локализуется в одном месте;
-        3) подклассы/моки могут переопределить без замены всего use-case.
+    @staticmethod
+    def _build_blocking_reason(product: ProductReadSchema) -> BlockingReasonSchema | None:
+        """Собирает объект blocking_reason из плоских полей продукта.
+
+        Возвращает None для незаблокированных товаров. Для заблокированных —
+        {id, title, comment}, где id берётся из ``blocking_reason_id``
+        (фолбэк на нулевой UUID, если ещё не проставлен), title/comment — из
+        ``blocking_reason_title`` / ``moderator_comment`` (пустая строка, если
+        flow модерации ещё не заполнил).
         """
-        return []
+        if product.status not in _BLOCKED_STATUSES:
+            return None
+        return BlockingReasonSchema(
+            id=product.blocking_reason_id or UUID(int=0),
+            title=product.blocking_reason_title or '',
+            comment=product.moderator_comment or '',
+        )
 
     async def __call__(
         self,
         product_id: UUID,
         current_user: AuthenticatedUserSchema,
-    ) -> ProductResponseSchema:
+    ) -> ProductDetailResponseSchema:
         product = await self.product_repository.get_or_none(product_id)
         if product is None:
             # Несуществующий товар.
@@ -93,7 +148,7 @@ class GetProductUseCase:
         characteristics = await self.characteristic_repository.list_by_product(product.id)
         skus = await self._load_skus(product.id)
 
-        return ProductResponseSchema(
+        return ProductDetailResponseSchema(
             id=product.id,
             seller_id=product.seller_id,
             category_id=product.category_id,
@@ -102,8 +157,6 @@ class GetProductUseCase:
             description=product.description,
             status=product.status,
             deleted=product.deleted,
-            blocking_reason_id=product.blocking_reason_id,
-            moderator_comment=product.moderator_comment,
             images=[
                 ProductImageResponseSchema(id=image.id, url=image.url, ordering=image.ordering) for image in images
             ],
@@ -114,4 +167,7 @@ class GetProductUseCase:
             skus=skus,
             created_at=product.created_at,
             updated_at=product.updated_at,
+            blocked=product.status in _BLOCKED_STATUSES,
+            blocking_reason=self._build_blocking_reason(product),
+            field_reports=[FieldReportSchema(**report) for report in (product.field_reports or [])],
         )

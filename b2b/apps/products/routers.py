@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
 from apps.products.schemas.request import ProductCreateRequestSchema, ProductEditRequestSchema
-from apps.products.schemas.response import ProductResponseSchema
+from apps.products.schemas.response import ProductDetailResponseSchema, ProductResponseSchema
 from apps.products.use_cases import (
     CreateProductUseCase,
     DeleteProductUseCase,
@@ -51,7 +51,7 @@ async def create_product(
 @router.get(
     '/{product_id}',
     status_code=status.HTTP_200_OK,
-    response_model=ProductResponseSchema,
+    response_model=ProductDetailResponseSchema,
     responses=get_error_responses,
 )
 @inject
@@ -59,8 +59,8 @@ async def get_product(
     product_id: UUID,
     use_case: FromDishka[GetProductUseCase],
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.SELLER)),
-) -> ProductResponseSchema:
-    """Seller cabinet: карточка товара продавца.
+) -> ProductDetailResponseSchema:
+    """Seller cabinet: карточка товара продавца (ProductDetailResponse).
 
     Чужой товар → 404 (НЕ 403): см. canon b2b-flows.md#view-product, защита
     от IDOR-by-discovery.

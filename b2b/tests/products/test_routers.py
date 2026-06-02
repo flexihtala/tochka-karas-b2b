@@ -21,6 +21,7 @@ from apps.products.routers import router as products_router
 from apps.products.schemas.request import ProductCreateRequestSchema, ProductEditRequestSchema
 from apps.products.schemas.response import (
     CharacteristicResponseSchema,
+    ProductDetailResponseSchema,
     ProductImageResponseSchema,
     ProductResponseSchema,
 )
@@ -81,7 +82,7 @@ class StubGetProductUseCase:
         self.error: Exception | None = None
         now = datetime.now(UTC)
         product_id = uuid4()
-        self.response = ProductResponseSchema(
+        self.response = ProductDetailResponseSchema(
             id=product_id,
             seller_id=uuid4(),
             category_id=uuid4(),
@@ -90,8 +91,6 @@ class StubGetProductUseCase:
             description='Флагман Apple',
             status=ProductStatus.MODERATED,
             deleted=False,
-            blocking_reason_id=None,
-            moderator_comment=None,
             images=[
                 ProductImageResponseSchema(id=uuid4(), url='/s3/iphone15-front.jpg', ordering=0),
             ],
@@ -101,13 +100,16 @@ class StubGetProductUseCase:
             skus=[],
             created_at=now,
             updated_at=now,
+            blocked=False,
+            blocking_reason=None,
+            field_reports=[],
         )
 
     async def __call__(
         self,
         product_id: UUID,
         current_user: AuthenticatedUserSchema,
-    ) -> ProductResponseSchema:
+    ) -> ProductDetailResponseSchema:
         self.calls.append((product_id, current_user))
         if self.error:
             raise self.error
@@ -350,8 +352,14 @@ def test_get_product_endpoint_returns_200(stub: StubCreateProductUseCase, get_st
     body = response.json()
     assert body['id'] == str(get_stub.response.id)
     assert body['status'] == ProductStatus.MODERATED.value
-    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
     assert isinstance(body['skus'], list)
+    # ProductDetailResponse-поля присутствуют в ответе
+    assert body['blocked'] is False
+    assert body['blocking_reason'] is None
+    assert body['field_reports'] == []
+    # плоских legacy-полей в seller-карточке быть не должно
+    assert 'blocking_reason_id' not in body
+    assert 'moderator_comment' not in body
     assert len(get_stub.calls) == 1
     passed_id, current_user = get_stub.calls[0]
     assert passed_id == product_id
