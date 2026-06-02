@@ -7,9 +7,10 @@ from uuid import UUID
 
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from apps.auth.schemas import ErrorResponseSchema
+from apps.catalog.filters import parse_deep_object_filter
 from apps.catalog.schemas import (
     CatalogFacetsResponseSchema,
     CatalogPaginatedResponseSchema,
@@ -34,21 +35,20 @@ error_responses = {
 )
 @inject
 async def list_products(
+    request: Request,
     use_case: FromDishka[ListProductsUseCase],
-    category_id: UUID | None = Query(default=None),
-    price_min: int | None = Query(default=None, ge=0),
-    price_max: int | None = Query(default=None, ge=0),
+    q: str | None = Query(default=None, max_length=200, description='Полнотекстовый поиск'),
     sort: str | None = Query(default=None),
-    search: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> CatalogPaginatedResponseSchema:
+    # deepObject-фильтры (filter[...]) FastAPI не парсит нативно — собираем из
+    # raw query string, см. apps.catalog.filters.parse_deep_object_filter.
+    catalog_filter = parse_deep_object_filter(request.query_params.multi_items())
     return await use_case(
-        category_id=category_id,
-        price_min=price_min,
-        price_max=price_max,
+        filter=catalog_filter,
         sort=sort,
-        search=search,
+        q=q,
         limit=limit,
         offset=offset,
     )

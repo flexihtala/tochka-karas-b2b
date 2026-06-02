@@ -19,6 +19,7 @@ import pytest
 
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import CatalogUnavailableError, InvalidSortError
+from apps.catalog.schemas.request import CatalogFilterSchema
 from apps.catalog.use_cases import GetFacetsUseCase, ListProductsUseCase
 from tests.catalog.fakes import make_handler, make_service_client
 
@@ -69,9 +70,7 @@ async def test_catalog_returns_filtered_sorted_products():
     use_case = ListProductsUseCase(b2b_client=_make_client(handler))
 
     result = await use_case(
-        category_id=category_id,
-        price_min=1000,
-        price_max=20000000,
+        filter=CatalogFilterSchema(category_id=category_id, price_min=1000, price_max=20000000),
         sort='price_asc',
         limit=20,
         offset=0,
@@ -84,11 +83,11 @@ async def test_catalog_returns_filtered_sorted_products():
     assert result.items[0].has_stock is True
     assert result.items[0].images[0].url == 'https://cdn/iphone.jpg'
 
-    # Параметры действительно ушли в B2B.
+    # Параметры действительно ушли в B2B (с маппингом B2C → B2B имён).
     sent = captured[0]
     assert sent.url.params['category_id'] == str(category_id)
-    assert sent.url.params['price_min'] == '1000'
-    assert sent.url.params['price_max'] == '20000000'
+    assert sent.url.params['min_price'] == '1000'
+    assert sent.url.params['max_price'] == '20000000'
     assert sent.url.params['sort'] == 'price_asc'
     assert sent.headers['X-Service-Key'] == 'test-key'
 
@@ -173,7 +172,7 @@ async def test_b2b_network_error_returns_502():
 
 
 @pytest.mark.anyio
-async def test_catalog_uses_default_sort_rating_when_omitted():
+async def test_catalog_uses_default_sort_popularity_when_omitted():
     captured: list[httpx.Request] = []
 
     handler = make_handler(
@@ -189,7 +188,32 @@ async def test_catalog_uses_default_sort_rating_when_omitted():
 
     await use_case()
 
-    assert captured[0].url.params['sort'] == 'rating'
+    # default popularity → маппится в B2B 'popular'.
+    assert captured[0].url.params['sort'] == 'popular'
+
+
+@pytest.mark.anyio
+async def test_catalog_empty_filter_sends_no_filter_params():
+    captured: list[httpx.Request] = []
+
+    handler = make_handler(
+        responses={
+            'GET /api/v1/catalog/products': (
+                200,
+                {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
+            ),
+        },
+        on_request=lambda r: captured.append(r),
+    )
+    use_case = ListProductsUseCase(b2b_client=_make_client(handler))
+
+    await use_case(filter=CatalogFilterSchema())
+
+    params = captured[0].url.params
+    assert 'category_id' not in params
+    assert 'min_price' not in params
+    assert 'max_price' not in params
+    assert 'seller_id' not in params
 
 
 @pytest.mark.anyio
@@ -204,7 +228,109 @@ async def test_catalog_empty_results_returns_200():
     )
     use_case = ListProductsUseCase(b2b_client=_make_client(handler))
 
-    result = await use_case(category_id=uuid4())
+    result = await use_case(filter=CatalogFilterSchema(category_id=uuid4()))
 
     assert result.total_count == 0
     assert result.items == []
+
+
+def _empty_handler(captured: list[httpx.Request]):
+    return make_handler(
+        responses={
+            'GET /api/v1/catalog/products': (
+                200,
+                {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
+            ),
+        },
+        on_request=lambda r: captured.append(r),
+    )
+
+
+@pytest.mark.anyio
+async def test_sort_new_is_accepted():
+    """sort=new больше не 400 — маппится в B2B created_desc."""
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    result = await use_case(sort='new')
+
+    assert result.total_count == 0
+    assert captured[0].url.params['sort'] == 'created_desc'
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ('b2c_sort', 'b2b_sort'),
+    [
+        ('price_asc', 'price_asc'),
+        ('price_desc', 'price_desc'),
+        ('popularity', 'popular'),
+        ('new', 'created_desc'),
+    ],
+)
+async def test_sort_mapping_b2c_to_b2b(b2c_sort, b2b_sort):
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(sort=b2c_sort)
+
+    assert captured[0].url.params['sort'] == b2b_sort
+
+
+@pytest.mark.anyio
+async def test_q_param_used_for_search():
+    """q=phone проксируется в B2B как search=phone."""
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(q='phone')
+
+    assert captured[0].url.params['search'] == 'phone'
+    assert 'q' not in captured[0].url.params
+
+
+@pytest.mark.anyio
+async def test_seller_id_filter_applied():
+    """filter[seller_id] доходит до B2B как seller_id."""
+    seller_id = uuid4()
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(filter=CatalogFilterSchema(seller_id=seller_id))
+
+    assert captured[0].url.params['seller_id'] == str(seller_id)
+
+
+@pytest.mark.anyio
+async def test_attributes_filter_applied():
+    """filter[attributes][color]=red доходит до B2B как filters[color]=red."""
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(filter=CatalogFilterSchema(attributes={'color': 'red'}))
+
+    assert captured[0].url.params['filters[color]'] == 'red'
+
+
+@pytest.mark.anyio
+async def test_attributes_filter_multi_value_applied():
+    """Список значений атрибута → несколько filters[key]=... (deepObject explode)."""
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(filter=CatalogFilterSchema(attributes={'color': ['red', 'blue']}))
+
+    values = captured[0].url.params.get_list('filters[color]')
+    assert values == ['red', 'blue']
+
+
+@pytest.mark.anyio
+async def test_price_filters_mapped_to_min_max_price():
+    """filter[price_min]/filter[price_max] → min_price/max_price."""
+    captured: list[httpx.Request] = []
+    use_case = ListProductsUseCase(b2b_client=_make_client(_empty_handler(captured)))
+
+    await use_case(filter=CatalogFilterSchema(price_min=10000, price_max=50000))
+
+    assert captured[0].url.params['min_price'] == '10000'
+    assert captured[0].url.params['max_price'] == '50000'

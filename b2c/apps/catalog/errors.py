@@ -8,10 +8,15 @@ class CatalogError(AppError):
 class InvalidSortError(CatalogError):
     def __init__(
         self,
-        message: str = (
-            'Invalid sort parameter. Allowed: rating, popularity, price_asc, price_desc, date_desc, discount_desc'
-        ),
+        message: str = 'Invalid sort parameter. Allowed: price_asc, price_desc, popularity, new',
     ):
+        super().__init__('INVALID_REQUEST', message, 400)
+
+
+class InvalidFilterError(CatalogError):
+    """Невалидный deepObject-фильтр (например price_min не integer, category_id не uuid)."""
+
+    def __init__(self, message: str = 'Invalid filter parameter'):
         super().__init__('INVALID_REQUEST', message, 400)
 
 

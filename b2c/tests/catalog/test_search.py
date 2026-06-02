@@ -17,6 +17,7 @@ import pytest
 
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import InvalidSearchError
+from apps.catalog.schemas.request import CatalogFilterSchema
 from apps.catalog.use_cases import ListProductsUseCase
 from tests.catalog.fakes import make_handler, make_service_client
 
@@ -62,11 +63,11 @@ async def test_search_returns_matching_products():
     )
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
-    result = await use_case(search='наушники')
+    result = await use_case(q='наушники')
 
     assert result.total_count == 1
     assert result.items[0].name == 'Беспроводные наушники Sony'
-    # search должен попасть в query string B2B запроса.
+    # q должен попасть в query string B2B запроса как search.
     assert captured[0].url.params['search'] == 'наушники'
 
 
@@ -76,7 +77,7 @@ async def test_short_query_returns_400():
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
     with pytest.raises(InvalidSearchError) as exc_info:
-        await use_case(search='ab')
+        await use_case(q='ab')
 
     assert exc_info.value.code == 'INVALID_REQUEST'
     assert exc_info.value.status_code == 400
@@ -89,10 +90,10 @@ async def test_query_too_long_returns_400():
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
     with pytest.raises(InvalidSearchError) as exc_info:
-        await use_case(search='a' * 256)
+        await use_case(q='a' * 201)
 
     assert exc_info.value.code == 'INVALID_REQUEST'
-    assert '255 characters' in exc_info.value.message
+    assert '200 characters' in exc_info.value.message
 
 
 @pytest.mark.anyio
@@ -114,7 +115,7 @@ async def test_special_chars_do_not_break_query():
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
     tricky = "100% O'Reilly_book"
-    result = await use_case(search=tricky)
+    result = await use_case(q=tricky)
 
     # Не упало.
     assert result.total_count == 0
@@ -134,7 +135,7 @@ async def test_empty_results_returns_200():
     )
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
-    result = await use_case(search='unknown_product_xyz')
+    result = await use_case(q='unknown_product_xyz')
 
     assert result.total_count == 0
     assert result.items == []
@@ -155,7 +156,7 @@ async def test_search_whitespace_only_skips_search():
     )
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
-    await use_case(search='   ')
+    await use_case(q='   ')
 
     assert 'search' not in captured[0].url.params
 
@@ -176,7 +177,7 @@ async def test_search_with_category_combined():
     category_id = uuid4()
     use_case = ListProductsUseCase(b2b_client=_client(handler))
 
-    await use_case(search='наушники', category_id=category_id, sort='price_asc')
+    await use_case(q='наушники', filter=CatalogFilterSchema(category_id=category_id), sort='price_asc')
 
     assert captured[0].url.params['search'] == 'наушники'
     assert captured[0].url.params['category_id'] == str(category_id)
