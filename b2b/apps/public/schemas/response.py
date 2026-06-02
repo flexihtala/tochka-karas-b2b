@@ -6,7 +6,8 @@
 - НЕТ `deleted` / `blocking_reason_id` / `moderator_comment` (фильтрация и так
   гарантирует, что в выдаче только видимые товары).
 
-См. спецификацию OpenAPI: ProductPublicResponse / SKUPublicResponse.
+См. спецификацию OpenAPI: ProductPublicShortResponse / ProductPublicResponse /
+SKUPublicResponse / ProductPublicPaginatedResponse.
 """
 
 from datetime import datetime
@@ -51,14 +52,34 @@ class SKUPublicResponseSchema(BaseModel):
     name: str
     price: int
     discount: int
+    stock_quantity: int = Field(description='Всего на складе (active + reserved)')
     active_quantity: int = Field(description='Доступно к продаже')
     article: str | None = None
     images: list[SKUImagePublicResponseSchema] = Field(default_factory=list)
     characteristics: list[CharacteristicPublicResponseSchema] = Field(default_factory=list)
 
 
+class ProductPublicShortResponseSchema(BaseModel):
+    """Короткая витринная карточка товара (для листинга и похожих товаров).
+
+    min_price = минимальная цена среди видимых SKU (active_quantity > 0).
+    cover_image = url первого изображения товара (по ordering) или None.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    slug: str
+    status: ProductStatus
+    category_id: UUID
+    min_price: int = Field(description='Минимальная цена SKU в копейках')
+    cover_image: str | None = None
+    created_at: datetime
+
+
 class ProductPublicResponseSchema(BaseModel):
-    """Витринная карточка товара для B2C через X-Service-Key.
+    """Полная витринная карточка товара для B2C через X-Service-Key.
 
     НЕ содержит deleted, blocking_reason_id, moderator_comment.
     SKU в response — без cost_price/reserved_quantity.
@@ -81,11 +102,11 @@ class ProductPublicResponseSchema(BaseModel):
 
 
 class ProductPublicPaginatedResponseSchema(BaseModel):
-    """Пагинированный ответ витрины."""
+    """Пагинированный ответ витрины (короткие карточки)."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    items: list[ProductPublicResponseSchema] = Field(default_factory=list)
+    items: list[ProductPublicShortResponseSchema] = Field(default_factory=list)
     total_count: int
     limit: int
     offset: int
