@@ -19,3 +19,15 @@ class SKURepository(DBCrudRepository[SKU, SKUCreateSchema, SKUReadSchema, SKUUpd
         async with self.session_manager.get_session() as session:
             rows = (await session.execute(query)).scalars().all()
             return list(rows)
+
+    async def list_full_by_product(self, product_id: UUID) -> list[SKUReadSchema]:
+        """Возвращает полные SKU-модели товара (seller-view), отсортированные по дате создания.
+
+        Используется в карточке товара продавца (US-B2B-05), чтобы вернуть все
+        варианты с cost_price / reserved_quantity. Картинки и характеристики SKU
+        подгружаются вызывающей стороной (отдельные репозитории).
+        """
+        query = select(SKU).where(SKU.product_id == product_id).order_by(SKU.created_at, SKU.id)
+        async with self.session_manager.get_session() as session:
+            rows = (await session.execute(query)).scalars().all()
+        return [self.model_validate(m) for m in rows]
