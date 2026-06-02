@@ -1,11 +1,12 @@
 """US-CAT-03: GET /api/v1/catalog/products/{id} — карточка товара для покупателя.
 
-Проксирует к B2B `/api/v1/catalog/products/{id}` (B2C-view: без cost_price и
+Проксирует к B2B `/api/v1/public/products/{id}` (B2C-view: без cost_price и
 reserved_quantity).
 
-Архитектура (ADR — variant 3): отдельный B2B endpoint `/catalog/products/{id}`.
-B2B на своей стороне отдаёт только публичные поля. B2C просто mapping в
-response-схему + установка in_stock = active_quantity > 0.
+Архитектура (ADR — variant 3): отдельный B2B endpoint `/public/products/{id}`.
+B2B на своей стороне отдаёт только публичные поля (ProductPublicResponse: title,
+skus[].active_quantity). B2C мапит в response-схему (name ← title, available_quantity
+← active_quantity) + ставит in_stock = active_quantity > 0.
 
 Edge cases (canon b2c-catalog-flows.md#b2c-3):
 - blocked / deleted / нет SKU с остатком (условие видимости не выполнено) → 404

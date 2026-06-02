@@ -10,6 +10,7 @@ from dishka import Provider, Scope, provide
 from apps.public.repositories import PublicCatalogRepository
 from apps.public.use_cases import (
     BatchProductsUseCase,
+    GetFacetsUseCase,
     GetPublicProductUseCase,
     GetPublicSKUUseCase,
     GetSimilarProductsUseCase,
@@ -23,6 +24,10 @@ class PublicProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def list_catalog_use_case(self, catalog_repository: PublicCatalogRepository) -> ListCatalogUseCase:
         return ListCatalogUseCase(repository=catalog_repository)
+
+    @provide(scope=Scope.REQUEST)
+    def get_facets_use_case(self, catalog_repository: PublicCatalogRepository) -> GetFacetsUseCase:
+        return GetFacetsUseCase(repository=catalog_repository)
 
     @provide(scope=Scope.REQUEST)
     def batch_products_use_case(self, catalog_repository: PublicCatalogRepository) -> BatchProductsUseCase:

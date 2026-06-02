@@ -32,7 +32,6 @@ def _make_client(handler) -> B2BCatalogClient:
 async def test_catalog_returns_filtered_sorted_products():
     category_id = uuid4()
     product_id = uuid4()
-    image_id = uuid4()
     captured: list[httpx.Request] = []
 
     def on_request(request: httpx.Request) -> None:
@@ -40,23 +39,20 @@ async def test_catalog_returns_filtered_sorted_products():
 
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            # B2B отдаёт ProductPublicShortResponse: title/cover_image/slug/status/...
+            'GET /api/v1/public/products': (
                 200,
                 {
                     'items': [
                         {
                             'id': str(product_id),
-                            'name': 'iPhone 15',
+                            'title': 'iPhone 15',
+                            'slug': 'iphone-15',
+                            'status': 'MODERATED',
+                            'category_id': str(category_id),
                             'min_price': 12999000,
-                            'has_stock': True,
-                            'images': [
-                                {
-                                    'id': str(image_id),
-                                    'url': 'https://cdn/iphone.jpg',
-                                    'ordering': 0,
-                                    'is_main': True,
-                                }
-                            ],
+                            'cover_image': 'https://cdn/iphone.jpg',
+                            'created_at': '2026-01-01T00:00:00Z',
                         }
                     ],
                     'total_count': 1,
@@ -78,10 +74,14 @@ async def test_catalog_returns_filtered_sorted_products():
 
     assert result.total_count == 1
     assert result.items[0].id == product_id
+    # name ← title (маппинг B2B → B2C).
     assert result.items[0].name == 'iPhone 15'
     assert result.items[0].min_price == 12999000
+    # has_stock = true (B2B листинг отдаёт только товары с остатком).
     assert result.items[0].has_stock is True
+    # images ← [{url: cover_image, ordering: 0}].
     assert result.items[0].images[0].url == 'https://cdn/iphone.jpg'
+    assert result.items[0].slug == 'iphone-15'
 
     # Параметры действительно ушли в B2B (с маппингом B2C → B2B имён).
     sent = captured[0]
@@ -95,12 +95,13 @@ async def test_catalog_returns_filtered_sorted_products():
 @pytest.mark.anyio
 async def test_facets_return_counts_per_filter_value():
     category_id = uuid4()
+    captured: list[httpx.Request] = []
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/facets': (
+            # B2B /public/facets отдаёт {facets, price_range} (без category_id).
+            'GET /api/v1/public/facets': (
                 200,
                 {
-                    'category_id': str(category_id),
                     'facets': [
                         {
                             'name': 'brand',
@@ -117,20 +118,28 @@ async def test_facets_return_counts_per_filter_value():
                             ],
                         },
                     ],
+                    'price_range': {'min': 100000, 'max': 50000000},
                 },
             ),
         },
+        on_request=lambda r: captured.append(r),
     )
     use_case = GetFacetsUseCase(b2b_client=_make_client(handler))
 
-    result = await use_case(category_id=category_id)
+    result = await use_case(category_id=category_id, price_min=1000, price_max=20000000)
 
-    assert result.category_id == category_id
     assert len(result.facets) == 2
     brand = next(f for f in result.facets if f.name == 'brand')
     assert {v.value: v.count for v in brand.values} == {'Apple': 124, 'Samsung': 98}
     color = next(f for f in result.facets if f.name == 'color')
     assert {v.value: v.count for v in color.values} == {'black': 60, 'white': 40}
+
+    # price_range из B2B игнорируется схемой B2C (extra), но не ломает парсинг.
+    # Параметры ушли в B2B с маппингом price_min/price_max → min_price/max_price.
+    sent = captured[0]
+    assert sent.url.params['category_id'] == str(category_id)
+    assert sent.url.params['min_price'] == '1000'
+    assert sent.url.params['max_price'] == '20000000'
 
 
 @pytest.mark.anyio
@@ -177,7 +186,7 @@ async def test_catalog_uses_default_sort_popularity_when_omitted():
 
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -198,7 +207,7 @@ async def test_catalog_empty_filter_sends_no_filter_params():
 
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -220,7 +229,7 @@ async def test_catalog_empty_filter_sends_no_filter_params():
 async def test_catalog_empty_results_returns_200():
     handler = make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -237,7 +246,7 @@ async def test_catalog_empty_results_returns_200():
 def _empty_handler(captured: list[httpx.Request]):
     return make_handler(
         responses={
-            'GET /api/v1/catalog/products': (
+            'GET /api/v1/public/products': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),

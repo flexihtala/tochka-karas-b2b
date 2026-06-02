@@ -1,7 +1,11 @@
 """US-CAT-01: GET /api/v1/catalog/facets — фасеты с подсчётом.
 
-Проксирует запрос в B2B `/api/v1/catalog/facets`. B2B решает, как считать
+Проксирует запрос в B2B `/api/v1/public/facets`. B2B решает, как считать
 фасеты (через SQL GROUP BY либо кэш — это его внутренняя деталь).
+
+Маппинг параметров B2C → B2B (как в list_products): price_min → min_price,
+price_max → max_price. Имена выровнены с `/api/v1/public/products`, чтобы
+фасеты считались по тому же набору фильтров, что и листинг.
 """
 
 from typing import Any
@@ -30,9 +34,9 @@ class GetFacetsUseCase:
         if category_id is not None:
             params['category_id'] = str(category_id)
         if price_min is not None:
-            params['price_min'] = price_min
+            params['min_price'] = price_min
         if price_max is not None:
-            params['price_max'] = price_max
+            params['max_price'] = price_max
 
         try:
             payload = await self.b2b_client.get_facets(params)
