@@ -109,7 +109,7 @@ def test_list_products_returns_200(stubs):
     )
     client = TestClient(_make_app(*stubs))
 
-    response = client.get('/api/v1/catalog/products?sort=price_asc&category_id=' + str(uuid4()))
+    response = client.get('/api/v1/catalog/products?sort=price_asc&filter[category_id]=' + str(uuid4()))
 
     assert response.status_code == 200
     body = response.json()
@@ -194,9 +194,10 @@ def test_list_products_invalid_limit_returns_400(stubs):
 def test_list_products_invalid_price_returns_400(stubs):
     client = TestClient(_make_app(*stubs))
 
-    response = client.get('/api/v1/catalog/products?price_min=-1')
+    response = client.get('/api/v1/catalog/products?filter[price_min]=-1')
 
     assert response.status_code == 400
+    assert response.json()['code'] == 'INVALID_REQUEST'
 
 
 def test_list_products_short_search_returns_400(stubs):
@@ -204,7 +205,7 @@ def test_list_products_short_search_returns_400(stubs):
     list_stub.error = InvalidSearchError(message='Search query must be at least 3 characters')
     client = TestClient(_make_app(*stubs))
 
-    response = client.get('/api/v1/catalog/products?search=ab')
+    response = client.get('/api/v1/catalog/products?q=ab')
 
     assert response.status_code == 400
     body = response.json()
@@ -212,11 +213,47 @@ def test_list_products_short_search_returns_400(stubs):
     assert '3 characters' in body['message']
 
 
-def test_list_products_with_search_passes_value_to_use_case(stubs):
+def test_list_products_with_q_passes_value_to_use_case(stubs):
     list_stub, facets_stub = stubs
     client = TestClient(_make_app(*stubs))
 
-    response = client.get('/api/v1/catalog/products?search=наушники')
+    response = client.get('/api/v1/catalog/products?q=наушники')
 
     assert response.status_code == 200
-    assert list_stub.calls[0]['search'] == 'наушники'
+    assert list_stub.calls[0]['q'] == 'наушники'
+
+
+def test_list_products_q_too_long_returns_422(stubs):
+    """q > 200 символов отсекается на уровне FastAPI Query(max_length=200)."""
+    client = TestClient(_make_app(*stubs))
+
+    response = client.get('/api/v1/catalog/products?q=' + 'a' * 201)
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'INVALID_REQUEST'
+
+
+def test_list_products_deep_object_filter_passed_to_use_case(stubs):
+    """filter[category_id] + filter[attributes][color] парсятся и доходят до use-case."""
+    list_stub, facets_stub = stubs
+    category_id = uuid4()
+    client = TestClient(_make_app(*stubs))
+
+    response = client.get(
+        f'/api/v1/catalog/products?filter[category_id]={category_id}'
+        '&filter[attributes][color]=red&filter[attributes][color]=blue'
+    )
+
+    assert response.status_code == 200
+    catalog_filter = list_stub.calls[0]['filter']
+    assert catalog_filter.category_id == category_id
+    assert catalog_filter.attributes == {'color': ['red', 'blue']}
+
+
+def test_list_products_sort_new_returns_200(stubs):
+    """sort=new валиден (раньше 400) — use-case замаппит в B2B created_desc."""
+    client = TestClient(_make_app(*stubs))
+
+    response = client.get('/api/v1/catalog/products?sort=new')
+
+    assert response.status_code == 200
