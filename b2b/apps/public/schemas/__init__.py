@@ -1,3 +1,4 @@
+from .request import BatchProductsRequestSchema as BatchProductsRequestSchema
 from .response import (
     CharacteristicPublicResponseSchema as CharacteristicPublicResponseSchema,
 )
@@ -9,6 +10,9 @@ from .response import (
 )
 from .response import (
     ProductPublicResponseSchema as ProductPublicResponseSchema,
+)
+from .response import (
+    ProductPublicShortResponseSchema as ProductPublicShortResponseSchema,
 )
 from .response import (
     SKUImagePublicResponseSchema as SKUImagePublicResponseSchema,

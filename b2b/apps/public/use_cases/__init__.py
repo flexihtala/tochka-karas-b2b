@@ -1,1 +1,5 @@
+from .batch_products import BatchProductsUseCase as BatchProductsUseCase
+from .get_product import GetPublicProductUseCase as GetPublicProductUseCase
+from .get_similar import GetSimilarProductsUseCase as GetSimilarProductsUseCase
+from .get_sku import GetPublicSKUUseCase as GetPublicSKUUseCase
 from .list_catalog import ListCatalogUseCase as ListCatalogUseCase
