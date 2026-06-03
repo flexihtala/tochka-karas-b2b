@@ -176,6 +176,98 @@ async def test_second_sku_no_state_change():
 
 
 @pytest.mark.anyio
+async def test_add_sku_to_moderated_product_returns_to_on_moderation():
+    """Canon B2B-2 (2026-05-27): SKU добавлен к MODERATED товару → ON_MODERATION + событие EDITED.
+
+    Иначе новый непроверенный вариант попал бы на витрину мимо модерации.
+    """
+    products = FakeProductRepositoryReadable()
+    product_images = FakeProductImageRepository()
+    product_characteristics = FakeProductCharacteristicRepository()
+    outbox = FakeOutboxRepository()
+
+    user = make_authenticated_user()
+    product_id = products.add(seller_id=user.id, status=ProductStatus.MODERATED, title='iPhone 15', slug='iphone-15')
+    product_images.add(product_id=product_id, url='/s3/p1.jpg', ordering=0)
+    product_characteristics.add(product_id=product_id, name='Бренд', value='Apple')
+
+    use_case = make_use_case(
+        product_repository=products,
+        product_image_repository=product_images,
+        product_characteristic_repository=product_characteristics,
+        outbox_repository=outbox,
+    )
+
+    response = await use_case(make_request(product_id=product_id), user)
+
+    # Статус вернулся на повторную модерацию.
+    assert products.by_id[product_id].status == ProductStatus.ON_MODERATION
+    assert len(products.updated) == 1
+    assert products.updated[0].status == ProductStatus.ON_MODERATION
+
+    # Событие EDITED в moderation с полным снимком продукта + новый SKU.
+    assert len(outbox.enqueued) == 1
+    event = outbox.enqueued[0]
+    assert event.event_type == 'EDITED'
+    assert event.target_service == ServiceName.MODERATION
+    assert event.idempotency_key is not None
+    payload = event.payload
+    assert payload['product_id'] == str(product_id)
+    assert payload['seller_id'] == str(user.id)
+    assert payload['title'] == 'iPhone 15'
+    assert payload['slug'] == 'iphone-15'
+    assert payload['category_id'] == str(products.by_id[product_id].category_id)
+    assert len(payload['images']) == 1
+    assert payload['images'][0]['url'] == '/s3/p1.jpg'
+    assert len(payload['characteristics']) == 1
+    assert payload['characteristics'][0]['name'] == 'Бренд'
+    # skus содержит только что созданный SKU.
+    assert len(payload['skus']) == 1
+    assert payload['skus'][0]['id'] == str(response.id)
+    assert payload['skus'][0]['name'] == '256GB Black'
+
+
+@pytest.mark.anyio
+async def test_add_sku_to_blocked_product_returns_to_on_moderation():
+    """Canon B2B-2 (2026-05-27): SKU добавлен к BLOCKED товару → ON_MODERATION + событие EDITED."""
+    products = FakeProductRepositoryReadable()
+    product_images = FakeProductImageRepository()
+    product_characteristics = FakeProductCharacteristicRepository()
+    outbox = FakeOutboxRepository()
+
+    user = make_authenticated_user()
+    product_id = products.add(seller_id=user.id, status=ProductStatus.BLOCKED, title='Levis 501', slug='levis-501')
+    product_images.add(product_id=product_id, url='/s3/levis.jpg', ordering=0)
+
+    use_case = make_use_case(
+        product_repository=products,
+        product_image_repository=product_images,
+        product_characteristic_repository=product_characteristics,
+        outbox_repository=outbox,
+    )
+
+    response = await use_case(make_request(product_id=product_id), user)
+
+    # Статус вернулся на повторную модерацию (исправление после блокировки).
+    assert products.by_id[product_id].status == ProductStatus.ON_MODERATION
+    assert len(products.updated) == 1
+    assert products.updated[0].status == ProductStatus.ON_MODERATION
+
+    # Событие EDITED в moderation.
+    assert len(outbox.enqueued) == 1
+    event = outbox.enqueued[0]
+    assert event.event_type == 'EDITED'
+    assert event.target_service == ServiceName.MODERATION
+    assert event.idempotency_key is not None
+    payload = event.payload
+    assert payload['product_id'] == str(product_id)
+    assert payload['seller_id'] == str(user.id)
+    assert payload['title'] == 'Levis 501'
+    assert len(payload['skus']) == 1
+    assert payload['skus'][0]['id'] == str(response.id)
+
+
+@pytest.mark.anyio
 async def test_add_sku_to_hard_blocked_returns_403():
     """Добавление SKU к товару со статусом HARD_BLOCKED → SKUForbiddenError (HARD_BLOCKED код)."""
     products = FakeProductRepositoryReadable()

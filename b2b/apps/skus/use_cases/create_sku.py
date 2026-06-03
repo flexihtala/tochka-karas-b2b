@@ -9,7 +9,12 @@
     2. В outbox enqueue-ится событие CREATED с target_service=moderation;
        payload — полный снимок продукта (title, description, category_id, slug,
        images, characteristics) + список skus содержащий только что созданный SKU.
-- Если уже есть SKU — НЕ меняем статус, НЕ кладём событие в outbox.
+- Если product.status in {MODERATED, BLOCKED} (canon B2B-2, правило от 2026-05-27):
+    1. product.status переходит в ON_MODERATION.
+    2. В outbox enqueue-ится событие EDITED с target_service=moderation;
+       payload идентичен CREATED-событию, отличается только event_type.
+    Иначе новый непроверенный вариант попал бы на витрину мимо модерации.
+- Если товар уже на ON_MODERATION (есть SKU) — НЕ меняем статус, НЕ кладём событие.
 - Минимум 1 изображение обязательно (на уровне use-case → 400).
 - discount — целое число в копейках, не процент.
 """
@@ -52,6 +57,10 @@ from apps.skus.schemas.response import (
 from shared.auth_lib import AuthenticatedUserSchema
 from shared.outbox import OutboxEnqueueSchema
 from shared.types import ServiceName
+
+# Статусы товара, при добавлении SKU к которым товар возвращается на повторную
+# модерацию с событием EDITED (canon B2B-2, правило от 2026-05-27).
+_RETURN_TO_MODERATION_FROM = frozenset({ProductStatus.MODERATED, ProductStatus.BLOCKED})
 
 
 class CreateSKUUseCase:
@@ -110,11 +119,17 @@ class CreateSKUUseCase:
             for ch in data.characteristics
         ]
 
-        # Side-effect: первый SKU + CREATED-товар → ON_MODERATION + outbox CREATED.
+        # Side-effects по статусу товара (canon B2B-2):
+        #  - первый SKU + CREATED-товар → ON_MODERATION + outbox CREATED;
+        #  - MODERATED/BLOCKED товар → ON_MODERATION + outbox EDITED (повторная модерация);
+        #  - ON_MODERATION (уже есть SKU) → без изменений, без события.
         is_first_sku = await self._is_first_sku(product.id)
-        if is_first_sku and product.status == ProductStatus.CREATED:
+        if product.status == ProductStatus.CREATED and is_first_sku:
             await self.product_repository.update(ProductUpdateSchema(id=product.id, status=ProductStatus.ON_MODERATION))
-            await self._enqueue_created_event(product, sku, images, characteristics)
+            await self._enqueue_moderation_event(product, sku, images, characteristics, event_type='CREATED')
+        elif product.status in _RETURN_TO_MODERATION_FROM:
+            await self.product_repository.update(ProductUpdateSchema(id=product.id, status=ProductStatus.ON_MODERATION))
+            await self._enqueue_moderation_event(product, sku, images, characteristics, event_type='EDITED')
 
         return SKUResponseSchema(
             id=sku.id,
@@ -159,13 +174,21 @@ class CreateSKUUseCase:
         count = await self.sku_repository.count_by_product(product_id)
         return count == 1
 
-    async def _enqueue_created_event(
+    async def _enqueue_moderation_event(
         self,
         product: ProductReadSchema,
         sku: SKUReadSchema,
         sku_images: list[SKUImageReadSchema],
         sku_characteristics: list[SKUCharacteristicValueReadSchema],
+        *,
+        event_type: str,
     ) -> None:
+        """Кладёт в outbox событие для модерации.
+
+        Payload — полный снимок продукта + только что созданный SKU. Формат
+        идентичен для CREATED (первый SKU на CREATED-товаре) и EDITED
+        (SKU добавлен к MODERATED/BLOCKED товару); различается только event_type.
+        """
         product_images = await self.product_image_repository.list_by_product(product.id)
         product_characteristics = await self.product_characteristic_repository.list_by_product(product.id)
 
@@ -202,7 +225,7 @@ class CreateSKUUseCase:
         await self.outbox_repository.enqueue_in_new_transaction(
             OutboxEnqueueSchema(
                 idempotency_key=uuid4(),
-                event_type='CREATED',
+                event_type=event_type,
                 target_service=ServiceName.MODERATION,
                 payload=payload,
             )
