@@ -17,6 +17,7 @@ class OrderCreateSchema(CreateUUIDSchema):
     address_id: UUID | None = None
     payment_method_id: UUID | None = None
     comment: str | None = None
+    cancel_reason: str | None = None
 
 
 class OrderReadSchema(ReadUUIDSchema):
@@ -30,6 +31,7 @@ class OrderReadSchema(ReadUUIDSchema):
     address_id: UUID | None
     payment_method_id: UUID | None
     comment: str | None
+    cancel_reason: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -43,6 +45,7 @@ class OrderUpdateSchema(UpdateUUIDSchema):
     address_id: UUID | None = None
     payment_method_id: UUID | None = None
     comment: str | None = None
+    cancel_reason: str | None = None
 
 
 class OrderItemCreateSchema(CreateUUIDSchema):

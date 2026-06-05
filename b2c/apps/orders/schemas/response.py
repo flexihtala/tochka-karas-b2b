@@ -49,6 +49,7 @@ class OrderResponseSchema(BaseModel):
     address: AddressResponseSchema
     payment_method: PaymentMethodResponseSchema | None = None
     comment: str | None = None
+    cancel_reason: str | None = None
     created_at: datetime
     paid_at: datetime | None = None
 

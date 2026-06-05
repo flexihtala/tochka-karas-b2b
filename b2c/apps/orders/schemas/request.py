@@ -27,3 +27,13 @@ class OrderCreateRequestSchema(BaseModel):
     payment_method_id: UUID
     comment: str | None = Field(default=None, max_length=1000)
     items_snapshot: list[OrderItemSnapshotSchema] | None = None
+
+
+class CancelRequestSchema(BaseModel):
+    """Тело POST /api/v1/orders/{order_id}/cancel (опциональное, spec).
+
+    Только причина отмены; всё остальное берётся из заказа. `reason` сохраняется
+    в orders.cancel_reason и возвращается в OrderResponse.
+    """
+
+    reason: str | None = Field(default=None, max_length=500)

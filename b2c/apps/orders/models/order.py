@@ -29,6 +29,7 @@ class Order(IDMixin, TimestampMixin, Base):
     address_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     payment_method_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     comment: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     def __init__(
         self,
@@ -42,6 +43,7 @@ class Order(IDMixin, TimestampMixin, Base):
         address_id: uuid.UUID | None = None,
         payment_method_id: uuid.UUID | None = None,
         comment: str | None = None,
+        cancel_reason: str | None = None,
     ):
         if id is not None:
             self.id = id
@@ -53,3 +55,4 @@ class Order(IDMixin, TimestampMixin, Base):
         self.address_id = address_id
         self.payment_method_id = payment_method_id
         self.comment = comment
+        self.cancel_reason = cancel_reason

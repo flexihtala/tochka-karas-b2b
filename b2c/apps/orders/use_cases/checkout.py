@@ -36,6 +36,7 @@ from apps.orders.repositories import OrderItemRepository, OrderRepository
 from apps.orders.schemas.db import OrderCreateSchema, OrderItemCreateSchema, OrderReadSchema
 from apps.orders.schemas.request import OrderCreateRequestSchema
 from apps.orders.schemas.response import OrderItemResponseSchema, OrderResponseSchema
+from apps.orders.use_cases.response_assembler import assemble_order_response
 from apps.payment_methods.repositories import PaymentMethodRepository
 from apps.payment_methods.schemas.response import PaymentMethodResponseSchema
 from shared.auth_lib import AuthenticatedUserSchema
@@ -289,59 +290,12 @@ class CheckoutUseCase:
     async def _assemble_response(self, order: OrderReadSchema) -> OrderResponseSchema:
         """Собирает ответ из персистентного заказа (идемпотентный повтор).
 
-        Адрес/способ оплаты подтягиваются по сохранённым id; если ресурс удалён
-        после создания заказа — возвращаем заглушку из снапшота, чтобы не падать.
+        Делегирует в общий ассемблер (тот же, что использует cancel), чтобы форма
+        ответа двух эндпоинтов не расходилась.
         """
-        items = await self.order_item_repository.list_for_order(order.id)
-        subtotal = sum(it.line_total for it in items)
-
-        address = None
-        if order.address_id is not None:
-            address = await self.address_repository.get_or_none(order.address_id)
-        payment_method = None
-        if order.payment_method_id is not None:
-            payment_method = await self.payment_method_repository.get_or_none(order.payment_method_id)
-
-        return OrderResponseSchema(
-            id=order.id,
-            buyer_id=order.user_id,
-            status=order.status,
-            items=[
-                OrderItemResponseSchema(
-                    sku_id=it.sku_id,
-                    product_id=it.product_id,
-                    name=f'{it.product_title} {it.sku_name}'.strip(),
-                    quantity=it.quantity,
-                    unit_price=it.unit_price,
-                    line_total=it.line_total,
-                )
-                for it in items
-            ],
-            subtotal=subtotal,
-            total=order.total_amount,
-            address=self._address_response(order, address),
-            payment_method=(
-                PaymentMethodResponseSchema.model_validate(payment_method) if payment_method is not None else None
-            ),
-            comment=order.comment,
-            created_at=order.created_at,
-            paid_at=order.created_at if order.status == OrderStatus.PAID.value else None,
-        )
-
-    @staticmethod
-    def _address_response(order: OrderReadSchema, address: object | None) -> AddressResponseSchema:
-        if address is not None:
-            return AddressResponseSchema.model_validate(address)
-        # Адрес удалён после оформления — отдаём минимальную заглушку (spec требует address).
-        return AddressResponseSchema(
-            id=order.address_id or order.id,
-            buyer_id=order.user_id,
-            country='',
-            city='',
-            street=order.delivery_address or '',
-            postal_code='',
-            comment=None,
-            is_default=False,
-            created_at=order.created_at,
-            updated_at=order.updated_at,
+        return await assemble_order_response(
+            order,
+            order_item_repository=self.order_item_repository,
+            address_repository=self.address_repository,
+            payment_method_repository=self.payment_method_repository,
         )

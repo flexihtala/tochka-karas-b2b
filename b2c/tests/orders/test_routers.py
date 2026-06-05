@@ -16,10 +16,11 @@ from apps.orders.errors import (
     InvalidAddressError,
     ReserveFailedError,
 )
+from apps.orders.errors import CancelNotAllowedError, OrderNotFoundError
 from apps.orders.routers import router as orders_router
 from apps.orders.schemas.request import OrderCreateRequestSchema
 from apps.orders.schemas.response import OrderItemResponseSchema, OrderResponseSchema
-from apps.orders.use_cases import CheckoutUseCase
+from apps.orders.use_cases import CancelOrderUseCase, CheckoutUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
@@ -272,3 +273,146 @@ def test_checkout_response_uses_spec_field_names(checkout_stub):
     assert 'address' in body
     assert body['subtotal'] == sum(it['line_total'] for it in body['items'])
     assert 'name' in body['items'][0]
+
+
+# --- US-ORD-03: cancel endpoint ---------------------------------------------
+
+
+class StubCancelOrderUseCase:
+    def __init__(self):
+        self.calls: list[tuple[UUID, AuthenticatedUserSchema, str | None]] = []
+        self.error: Exception | None = None
+        self.response: OrderResponseSchema | None = None
+
+    async def __call__(
+        self,
+        order_id: UUID,
+        current_user: AuthenticatedUserSchema,
+        *,
+        reason: str | None = None,
+    ) -> OrderResponseSchema:
+        self.calls.append((order_id, current_user, reason))
+        if self.error:
+            raise self.error
+        if self.response is not None:
+            return self.response
+        order = _make_order_response(current_user.id, order_id)
+        order.status = 'CANCELLED'
+        return order
+
+
+class CancelRouteProvider(Provider):
+    def __init__(self, cancel_stub: StubCancelOrderUseCase):
+        super().__init__()
+        self.cancel_stub = cancel_stub
+
+    @provide(scope=Scope.REQUEST)
+    def get_cancel(self) -> CancelOrderUseCase:
+        return self.cancel_stub
+
+
+def _make_cancel_app(cancel_stub: StubCancelOrderUseCase, user: AuthenticatedUserSchema | None) -> FastAPI:
+    class _UserInjector(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            request.state.user = user
+            return await call_next(request)
+
+    app = FastAPI()
+    app.add_middleware(_UserInjector)
+    app.include_router(orders_router, prefix='/api/v1')
+    setup_error_handlers(app)
+    container = make_async_container(
+        FastapiProvider(),
+        CancelRouteProvider(cancel_stub),
+    )
+    setup_dishka(container, app)
+    return app
+
+
+@pytest.fixture
+def cancel_stub():
+    return StubCancelOrderUseCase()
+
+
+def test_cancel_returns_200_cancelled(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+    order_id = uuid4()
+
+    response = client.post(f'/api/v1/orders/{order_id}/cancel')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'CANCELLED'
+    assert cancel_stub.calls[0][0] == order_id
+    assert cancel_stub.calls[0][1].id == user.id
+
+
+def test_cancel_returns_200_cancel_pending(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    pending = _make_order_response(user.id)
+    pending.status = 'CANCEL_PENDING'
+    cancel_stub.response = pending
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 200
+    assert response.json()['status'] == 'CANCEL_PENDING'
+
+
+def test_cancel_not_allowed_returns_409_with_current_status(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    cancel_stub.error = CancelNotAllowedError(current_status='ASSEMBLING')
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body['code'] == 'CANCEL_NOT_ALLOWED'
+    assert body['current_status'] == 'ASSEMBLING'
+
+
+def test_cancel_foreign_order_returns_404(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    cancel_stub.error = OrderNotFoundError()
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 404
+    assert response.json()['code'] == 'ORDER_NOT_FOUND'
+
+
+def test_cancel_unauthorized_returns_401(cancel_stub):
+    client = TestClient(_make_cancel_app(cancel_stub, user=None))
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+    assert response.status_code == 401
+
+
+def test_cancel_non_buyer_returns_403(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+    assert response.status_code == 403
+
+
+def test_cancel_reason_forwarded_to_use_case(cancel_stub):
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel', json={'reason': 'too expensive'})
+
+    assert response.status_code == 200
+    assert cancel_stub.calls[0][2] == 'too expensive'
+
+
+def test_cancel_empty_body_allowed(cancel_stub):
+    """Body is optional — POST with no body must still work (reason=None)."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_cancel_app(cancel_stub, user=user))
+
+    response = client.post(f'/api/v1/orders/{uuid4()}/cancel')
+
+    assert response.status_code == 200
+    assert cancel_stub.calls[0][2] is None
