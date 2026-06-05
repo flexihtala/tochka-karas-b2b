@@ -1,7 +1,8 @@
-"""US-ORD-01: POST /api/v1/orders — checkout.
+"""US-ORD-01: POST /api/v1/orders — checkout (cart-based, spec OpenAPI).
 
 Auth: Bearer JWT, role BUYER. user_id берётся из JWT (никогда из body/query).
-Per spec: `Idempotency-Key` header is required (b2c openapi.yaml).
+`Idempotency-Key` — обязательный заголовок (b2c openapi.yaml). Отсутствие/невалидный
+UUID → 400 INVALID_REQUEST (RequestValidationError → validation_error_handler).
 """
 
 from uuid import UUID
@@ -11,7 +12,8 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Depends, Header, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
-from apps.orders.schemas import CheckoutRequestSchema, OrderResponseSchema
+from apps.cart.schemas.response import CartValidationResponseSchema
+from apps.orders.schemas import OrderCreateRequestSchema, OrderResponseSchema
 from apps.orders.use_cases import CheckoutUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
@@ -22,8 +24,8 @@ error_responses = {
     400: {'model': ErrorResponseSchema},
     401: {'model': ErrorResponseSchema},
     403: {'model': ErrorResponseSchema},
-    404: {'model': ErrorResponseSchema},
     409: {'model': ErrorResponseSchema},
+    422: {'model': CartValidationResponseSchema},
     503: {'model': ErrorResponseSchema},
 }
 
@@ -35,16 +37,16 @@ error_responses = {
 )
 @inject
 async def create_order(
-    data: CheckoutRequestSchema,
+    data: OrderCreateRequestSchema,
     response: Response,
     use_case: FromDishka[CheckoutUseCase],
-    idempotency_key_header: UUID | None = Header(default=None, alias='Idempotency-Key'),
+    idempotency_key: UUID = Header(alias='Idempotency-Key'),
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
 ) -> OrderResponseSchema:
-    # Spec: Idempotency-Key — header. Body-поле сохраняем для обратной совместимости,
-    # но header имеет приоритет, если передан.
-    if idempotency_key_header is not None:
-        data = data.model_copy(update={'idempotency_key': idempotency_key_header})
-    order, created = await use_case(data, current_user)
+    order, created = await use_case(
+        idempotency_key=idempotency_key,
+        data=data,
+        current_user=current_user,
+    )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return order
