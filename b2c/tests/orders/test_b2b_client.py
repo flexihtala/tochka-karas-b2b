@@ -1,4 +1,9 @@
-"""Тесты B2BInventoryClient через httpx MockTransport."""
+"""Тесты B2BInventoryClient через реальный ServiceClient + httpx.MockTransport.
+
+Мокаем ТОЛЬКО HTTP-границу: ServiceClient(transport=MockTransport) исполняет весь
+прод-код (заголовки X-Service-Key, разбор JSON, ServiceClientError), а MockTransport
+интерсептит исходящие запросы.
+"""
 
 from uuid import uuid4
 
@@ -10,64 +15,111 @@ from apps.orders.errors import B2BUnavailableError, ReserveFailedError
 from shared.http_clients import ServiceClient
 
 
-class _PatchedServiceClient(ServiceClient):
-    """ServiceClient, который использует MockTransport вместо реального HTTP."""
-
-    def __init__(self, base_url: str, service_key: str, transport: httpx.MockTransport):
-        super().__init__(base_url=base_url, service_key=service_key)
-        self._transport = transport
-
-    async def _request(self, method, path, **kwargs):  # type: ignore[override]
-        # Заменяем AsyncClient на MockTransport-вариант.
-        import httpx as _httpx
-
-        url = f'{self.base_url}{path}'
-        headers = {'X-Service-Key': self.service_key}
-        if kwargs.get('idempotency_key'):
-            headers['Idempotency-Key'] = kwargs['idempotency_key']
-
-        async with _httpx.AsyncClient(transport=self._transport) as client:
-            response = await client.request(
-                method,
-                url,
-                json=kwargs.get('json'),
-                params=kwargs.get('params'),
-                headers=headers,
-            )
-
-        if response.status_code >= 400:
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = response.text
-            from shared.http_clients import ServiceClientError
-
-            raise ServiceClientError(
-                status_code=response.status_code,
-                message=f'{method} {path} failed',
-                payload=payload,
-            )
-
-        if not response.content:
-            return {}
-        return response.json()
-
-
-def _make_client(handler):
+def _make_client(handler) -> B2BInventoryClient:
     transport = httpx.MockTransport(handler)
-    sc = _PatchedServiceClient(base_url='http://b2b.test', service_key='k', transport=transport)
+    sc = ServiceClient(base_url='http://b2b.test', service_key='k', transport=transport)
     return B2BInventoryClient(service_client=sc)
 
 
 @pytest.mark.anyio
-async def test_reserve_returns_payload_on_200():
+async def test_get_products_batch_hits_batch_path_with_service_key():
+    sku_id = uuid4()
+    product_id = uuid4()
+    seen: dict = {}
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers['X-Service-Key'] == 'k'
-        return httpx.Response(200, json={'reserved': True, 'items': []})
+        seen['path'] = request.url.path
+        seen['service_key'] = request.headers.get('X-Service-Key')
+        import json as _json
+
+        seen['body'] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    'id': str(product_id),
+                    'title': 'Phone',
+                    'status': 'MODERATED',
+                    'skus': [
+                        {
+                            'id': str(sku_id),
+                            'product_id': str(product_id),
+                            'name': '128GB',
+                            'price': 12_999_000,
+                            'active_quantity': 7,
+                            'article': 'A-1',
+                            'images': [],
+                        }
+                    ],
+                }
+            ],
+        )
 
     client = _make_client(handler)
-    res = await client.reserve(idempotency_key=uuid4(), items=[])
-    assert res == {'reserved': True, 'items': []}
+    index = await client.get_products_batch([product_id])
+
+    assert seen['path'] == '/api/v1/public/products/batch'
+    assert seen['service_key'] == 'k'
+    assert seen['body'] == {'product_ids': [str(product_id)]}
+    assert sku_id in index
+    assert index[sku_id]['price'] == 12_999_000
+    assert index[sku_id]['active_quantity'] == 7
+    assert index[sku_id]['product_title'] == 'Phone'
+    assert index[sku_id]['sku_name'] == '128GB'
+    assert index[sku_id]['product_id'] == product_id
+
+
+@pytest.mark.anyio
+async def test_get_products_batch_omits_missing_products():
+    """Невидимые товары просто отсутствуют в массиве → не попадают в индекс."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    client = _make_client(handler)
+    index = await client.get_products_batch([uuid4()])
+    assert index == {}
+
+
+@pytest.mark.anyio
+async def test_get_products_batch_5xx_raises_b2b_unavailable():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={'code': 'UNAVAILABLE'})
+
+    client = _make_client(handler)
+    with pytest.raises(B2BUnavailableError):
+        await client.get_products_batch([uuid4()])
+
+
+@pytest.mark.anyio
+async def test_reserve_hits_reserve_path_with_order_id_and_service_key():
+    order_id = uuid4()
+    key = uuid4()
+    sku_id = uuid4()
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        seen['path'] = request.url.path
+        seen['service_key'] = request.headers.get('X-Service-Key')
+        seen['body'] = _json.loads(request.content)
+        return httpx.Response(200, json={'order_id': str(order_id), 'status': 'RESERVED', 'reserved_at': 'now'})
+
+    client = _make_client(handler)
+    res = await client.reserve(
+        idempotency_key=key,
+        order_id=order_id,
+        items=[{'sku_id': str(sku_id), 'quantity': 2}],
+    )
+
+    assert seen['path'] == '/api/v1/inventory/reserve'
+    assert seen['service_key'] == 'k'
+    # order_id MUST be in the reserve payload (bug #2 fix).
+    assert seen['body']['order_id'] == str(order_id)
+    assert seen['body']['idempotency_key'] == str(key)
+    assert seen['body']['items'] == [{'sku_id': str(sku_id), 'quantity': 2}]
+    assert res['status'] == 'RESERVED'
 
 
 @pytest.mark.anyio
@@ -78,16 +130,26 @@ async def test_reserve_409_with_failed_items_raises_reserve_failed_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             409,
-            json={
-                'code': 'RESERVE_FAILED',
-                'message': 'fail',
-                'details': {'failed_items': failed_items},
-            },
+            json={'code': 'RESERVE_FAILED', 'message': 'fail', 'details': {'failed_items': failed_items}},
         )
 
     client = _make_client(handler)
     with pytest.raises(ReserveFailedError) as err:
-        await client.reserve(idempotency_key=uuid4(), items=[])
+        await client.reserve(idempotency_key=uuid4(), order_id=uuid4(), items=[])
+    assert err.value.failed_items == failed_items
+
+
+@pytest.mark.anyio
+async def test_reserve_409_failed_items_top_level_fallback():
+    """Если B2B вернул failed_items на верхнем уровне (без details) — тоже читаем."""
+    failed_items = [{'sku_id': str(uuid4()), 'requested': 2, 'available': 0, 'reason': 'OUT_OF_STOCK'}]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={'code': 'RESERVE_FAILED', 'failed_items': failed_items})
+
+    client = _make_client(handler)
+    with pytest.raises(ReserveFailedError) as err:
+        await client.reserve(idempotency_key=uuid4(), order_id=uuid4(), items=[])
     assert err.value.failed_items == failed_items
 
 
@@ -98,7 +160,7 @@ async def test_reserve_5xx_raises_b2b_unavailable():
 
     client = _make_client(handler)
     with pytest.raises(B2BUnavailableError):
-        await client.reserve(idempotency_key=uuid4(), items=[])
+        await client.reserve(idempotency_key=uuid4(), order_id=uuid4(), items=[])
 
 
 @pytest.mark.anyio
@@ -108,34 +170,7 @@ async def test_reserve_network_error_raises_b2b_unavailable():
 
     client = _make_client(handler)
     with pytest.raises(B2BUnavailableError):
-        await client.reserve(idempotency_key=uuid4(), items=[])
-
-
-@pytest.mark.anyio
-async def test_get_skus_info_parses_items():
-    sku_id = uuid4()
-    product_id = uuid4()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                'items': [
-                    {
-                        'id': str(sku_id),
-                        'product_id': str(product_id),
-                        'product_title': 'Phone',
-                        'name': '128GB',
-                        'price': 12_999_000,
-                    }
-                ],
-            },
-        )
-
-    client = _make_client(handler)
-    info = await client.get_skus_info([sku_id])
-    assert sku_id in info
-    assert info[sku_id]['price'] == 12_999_000
+        await client.reserve(idempotency_key=uuid4(), order_id=uuid4(), items=[])
 
 
 @pytest.mark.anyio

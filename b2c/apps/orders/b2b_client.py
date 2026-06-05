@@ -1,7 +1,8 @@
 """B2BInventoryClient — обёртка над shared.http_clients.ServiceClient для
-inventory-эндпоинтов B2B.
+inventory/catalog-эндпоинтов B2B.
 
-Реализует контракт b2c-orders-flows.md:
+Реализует контракт b2c-orders-flows.md + b2c openapi.yaml:
+- POST /api/v1/public/products/batch — снапшот цен/наличия (JSON-массив товаров)
 - POST /api/v1/inventory/reserve — 200 OK / 409 RESERVE_FAILED / 5xx
 - POST /api/v1/inventory/unreserve — 200 OK / 5xx
 - POST /api/v1/inventory/fulfill — 200 OK / 5xx
@@ -26,21 +27,24 @@ class B2BInventoryClient:
     def __init__(self, service_client: ServiceClient):
         self.service_client = service_client
 
-    async def get_skus_info(self, sku_ids: list[UUID]) -> dict[UUID, dict[str, Any]]:
-        """Batch GET /api/v1/skus?ids=... — нужно для снапшота product_title/sku_name/price.
+    async def get_products_batch(self, product_ids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+        """Batch `POST /api/v1/public/products/batch` — снапшот product_title/sku_name/price.
 
-        Возвращает {sku_id: raw_dict}. Отсутствующие SKU (удалённые/невидимые)
-        просто не попадут в выдачу — checkout сам решит, как реагировать.
+        Тело: {"product_ids": [...]}. Ответ — JSON-**массив** видимых товаров
+        (а не dict): [{id, title, status, skus: [{id, product_id, name, price,
+        discount, stock_quantity, active_quantity, article, images}], ...}].
+        Невидимые/удалённые товары просто отсутствуют в выдаче.
 
-        Ожидаемый контракт от B2B (см. b2c-cart-flows.md): items: [{id, title,
-        product_id, product_title, price, available_quantity, blocked}].
+        Возвращает плоский индекс по SKU:
+            {sku_id: {product_id, product_title, sku_name, price, active_quantity}}
+        — checkout сам решит, как реагировать на отсутствующие SKU.
         """
-        if not sku_ids:
+        if not product_ids:
             return {}
         try:
-            payload = await self.service_client.get(
-                '/api/v1/skus',
-                params={'ids': ','.join(str(s) for s in sku_ids)},
+            payload = await self.service_client.post(
+                '/api/v1/public/products/batch',
+                json={'product_ids': [str(pid) for pid in product_ids]},
             )
         except ServiceClientError as exc:
             if exc.status_code >= 500:
@@ -50,24 +54,53 @@ class B2BInventoryClient:
             raise B2BUnavailableError() from exc
 
         index: dict[UUID, dict[str, Any]] = {}
-        for raw in payload.get('items', []) if isinstance(payload, dict) else []:
-            raw_id = raw.get('id') if isinstance(raw, dict) else None
-            if raw_id is None:
+        for product in payload if isinstance(payload, list) else []:
+            if not isinstance(product, dict):
                 continue
-            try:
-                sku_id = UUID(str(raw_id))
-            except ValueError:
-                continue
-            index[sku_id] = raw
+            product_title = str(product.get('title', ''))
+            for sku in product.get('skus') or []:
+                if not isinstance(sku, dict):
+                    continue
+                raw_id = sku.get('id')
+                if raw_id is None:
+                    continue
+                try:
+                    sku_id = UUID(str(raw_id))
+                except ValueError:
+                    continue
+                raw_product_id = sku.get('product_id') or product.get('id')
+                if raw_product_id is None:
+                    continue
+                try:
+                    product_id = UUID(str(raw_product_id))
+                except ValueError:
+                    continue
+                index[sku_id] = {
+                    'product_id': product_id,
+                    'product_title': product_title,
+                    'sku_name': str(sku.get('name', '')),
+                    'price': int(sku.get('price', 0)),
+                    'active_quantity': int(sku.get('active_quantity', 0)),
+                }
         return index
 
     async def reserve(
         self,
+        *,
         idempotency_key: UUID,
+        order_id: UUID,
         items: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """POST /api/v1/inventory/reserve.
+
+        B2B ReserveRequestSchema требует [idempotency_key, order_id, items], где
+        items = [{sku_id, quantity}]. Дедуп идёт по idempotency_key, поэтому
+        per-request order_id безопасен. 200 → {order_id, status, reserved_at};
+        409 → ReserveFailedError(details.failed_items); 5xx/timeout → B2BUnavailable.
+        """
         payload = {
             'idempotency_key': str(idempotency_key),
+            'order_id': str(order_id),
             'items': items,
         }
         try:

@@ -16,6 +16,7 @@ class OrderCreateSchema(CreateUUIDSchema):
     delivery_address: str | None = None
     address_id: UUID | None = None
     payment_method_id: UUID | None = None
+    comment: str | None = None
 
 
 class OrderReadSchema(ReadUUIDSchema):
@@ -28,6 +29,7 @@ class OrderReadSchema(ReadUUIDSchema):
     delivery_address: str | None
     address_id: UUID | None
     payment_method_id: UUID | None
+    comment: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -40,6 +42,7 @@ class OrderUpdateSchema(UpdateUUIDSchema):
     delivery_address: str | None = None
     address_id: UUID | None = None
     payment_method_id: UUID | None = None
+    comment: str | None = None
 
 
 class OrderItemCreateSchema(CreateUUIDSchema):
