@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # Service-to-service ключи. b2c_to_b2b_key используется в /inventory/* endpoints.
     b2c_to_b2b_key: str = Field(default='dev-b2c-to-b2b-key-change-me', alias='B2C_TO_B2B_KEY')
+    # mod_to_b2b_key используется в /moderation/events endpoint (US-B2B-09).
+    mod_to_b2b_key: str = Field(default='dev-mod-to-b2b-key-change-me', alias='MOD_TO_B2B_KEY')
 
     @property
     def sync_database_url(self) -> str:
