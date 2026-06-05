@@ -9,7 +9,13 @@ from apps.cart.schemas.db import CartItemReadSchema, CartReadSchema
 from apps.orders.b2b_client import B2BInventoryClient
 from apps.orders.errors import B2BUnavailableError, ReserveFailedError
 from apps.orders.models import OrderItem
-from apps.orders.schemas.db import OrderCreateSchema, OrderItemCreateSchema, OrderItemReadSchema, OrderReadSchema
+from apps.orders.schemas.db import (
+    OrderCreateSchema,
+    OrderItemCreateSchema,
+    OrderItemReadSchema,
+    OrderReadSchema,
+    OrderUpdateSchema,
+)
 from apps.payment_methods.schemas.db import PaymentMethodReadSchema
 
 
@@ -58,6 +64,7 @@ class FakeOrderRepository:
             address_id=order_data.address_id,
             payment_method_id=order_data.payment_method_id,
             comment=order_data.comment,
+            cancel_reason=order_data.cancel_reason,
             created_at=now,
             updated_at=now,
         )
@@ -81,6 +88,16 @@ class FakeOrderRepository:
         self.by_idempotency_key[order_data.idempotency_key] = order_id
         self.items_by_order[order_id] = item_models
         return order, item_models
+
+    async def update(self, data: OrderUpdateSchema) -> OrderReadSchema | None:
+        """Мирроринг DBCrudRepository.update: применяет только заданные (set) поля."""
+        order = self.by_id.get(data.id)
+        if order is None:
+            return None
+        values = data.model_dump(exclude_unset=True, exclude={'id'})
+        updated = order.model_copy(update={**values, 'updated_at': datetime.now(UTC)})
+        self.by_id[data.id] = updated
+        return updated
 
     def seed_order(self, order: OrderReadSchema, items: list[OrderItem]) -> None:
         self.by_id[order.id] = order
@@ -171,6 +188,7 @@ class FakeB2BInventoryClient(B2BInventoryClient):
         reserve_failed_items: list | None — если задан, reserve бросит ReserveFailedError.
         b2b_503: bool — reserve бросит B2BUnavailableError.
         batch_503: bool — get_products_batch бросит B2BUnavailableError.
+        unreserve_503: bool — unreserve бросит B2BUnavailableError (B2B недоступен).
     """
 
     def __init__(self) -> None:  # type: ignore[no-untyped-def]
@@ -179,8 +197,10 @@ class FakeB2BInventoryClient(B2BInventoryClient):
         self.reserve_failed_items: list[dict[str, Any]] | None = None
         self.b2b_503: bool = False
         self.batch_503: bool = False
+        self.unreserve_503: bool = False
         self.reserve_calls: list[dict[str, Any]] = []
         self.batch_calls: list[list[UUID]] = []
+        self.unreserve_calls: list[dict[str, Any]] = []
 
     async def get_products_batch(self, product_ids: list[UUID]) -> dict[UUID, dict[str, Any]]:
         self.batch_calls.append(list(product_ids))
@@ -201,6 +221,17 @@ class FakeB2BInventoryClient(B2BInventoryClient):
         if self.reserve_failed_items is not None:
             raise ReserveFailedError(failed_items=self.reserve_failed_items)
         return {'order_id': str(order_id), **self.reserve_response}
+
+    async def unreserve(
+        self,
+        *,
+        order_id: UUID,
+        items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        self.unreserve_calls.append({'order_id': order_id, 'items': items})
+        if self.unreserve_503:
+            raise B2BUnavailableError()
+        return {'order_id': str(order_id), 'unreserved': True, 'items': items}
 
 
 def make_sku_entry(
@@ -268,6 +299,63 @@ def make_address(*, buyer_id: UUID, address_id: UUID | None = None) -> AddressRe
         created_at=now,
         updated_at=now,
     )
+
+
+def make_order(
+    *,
+    user_id: UUID,
+    status: str,
+    order_id: UUID | None = None,
+    total_amount: int = 20_000,
+    address_id: UUID | None = None,
+    payment_method_id: UUID | None = None,
+    comment: str | None = None,
+    cancel_reason: str | None = None,
+) -> OrderReadSchema:
+    """Персистентный заказ для cancel-тестов (как вернул бы OrderRepository)."""
+    now = datetime.now(UTC)
+    return OrderReadSchema(
+        id=order_id or uuid4(),
+        user_id=user_id,
+        status=status,
+        total_amount=total_amount,
+        idempotency_key=uuid4(),
+        delivery_address=None,
+        address_id=address_id,
+        payment_method_id=payment_method_id,
+        comment=comment,
+        cancel_reason=cancel_reason,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def make_order_item(
+    *,
+    order_id: UUID,
+    sku_id: UUID | None = None,
+    product_id: UUID | None = None,
+    product_title: str = 'iPhone 15 Pro Max',
+    sku_name: str = '256GB Black',
+    quantity: int = 1,
+    unit_price: int = 20_000,
+) -> OrderItem:
+    """OrderItem-модель (снапшот позиции) для seed_order в cancel-тестах."""
+    now = datetime.now(UTC)
+    item = OrderItem(
+        id=uuid4(),
+        order_id=order_id,
+        sku_id=sku_id or uuid4(),
+        product_id=product_id or uuid4(),
+        product_title=product_title,
+        sku_name=sku_name,
+        quantity=quantity,
+        unit_price=unit_price,
+        line_total=unit_price * quantity,
+    )
+    item.created_at = now  # type: ignore[attr-defined]
+    item.updated_at = now  # type: ignore[attr-defined]
+    return item
 
 
 def make_payment_method(*, buyer_id: UUID, payment_method_id: UUID | None = None) -> PaymentMethodReadSchema:

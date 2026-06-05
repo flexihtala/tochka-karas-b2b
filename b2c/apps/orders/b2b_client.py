@@ -119,11 +119,18 @@ class B2BInventoryClient:
 
     async def unreserve(
         self,
-        idempotency_key: UUID,
+        *,
+        order_id: UUID,
         items: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """POST /api/v1/inventory/unreserve.
+
+        B2B UnreserveRequestSchema требует {order_id, items}: идемпотентность на
+        стороне B2B — по order_id (а не по отдельному idempotency_key). items =
+        [{sku_id, quantity}]. 200 → {unreserved, items}; 5xx/timeout → B2BUnavailable.
+        """
         payload = {
-            'idempotency_key': str(idempotency_key),
+            'order_id': str(order_id),
             'items': items,
         }
         try:

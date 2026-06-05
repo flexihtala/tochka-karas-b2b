@@ -180,7 +180,30 @@ async def test_unreserve_5xx_raises_b2b_unavailable():
 
     client = _make_client(handler)
     with pytest.raises(B2BUnavailableError):
-        await client.unreserve(idempotency_key=uuid4(), items=[])
+        await client.unreserve(order_id=uuid4(), items=[])
+
+
+@pytest.mark.anyio
+async def test_unreserve_sends_order_id_and_items():
+    """B2B UnreserveRequestSchema requires {order_id, items}; idempotency is by order_id."""
+    order_id = uuid4()
+    sku_id = uuid4()
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        seen['path'] = request.url.path
+        seen['body'] = _json.loads(request.content)
+        return httpx.Response(200, json={'unreserved': True})
+
+    client = _make_client(handler)
+    res = await client.unreserve(order_id=order_id, items=[{'sku_id': str(sku_id), 'quantity': 2}])
+
+    assert res == {'unreserved': True}
+    assert seen['path'] == '/api/v1/inventory/unreserve'
+    assert seen['body'] == {'order_id': str(order_id), 'items': [{'sku_id': str(sku_id), 'quantity': 2}]}
+    assert 'idempotency_key' not in seen['body']
 
 
 @pytest.mark.anyio

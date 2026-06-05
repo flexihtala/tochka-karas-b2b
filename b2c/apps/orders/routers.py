@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, Header, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
 from apps.cart.schemas.response import CartValidationResponseSchema
-from apps.orders.schemas import OrderCreateRequestSchema, OrderResponseSchema
-from apps.orders.use_cases import CheckoutUseCase
+from apps.orders.schemas import CancelRequestSchema, OrderCreateRequestSchema, OrderResponseSchema
+from apps.orders.use_cases import CancelOrderUseCase, CheckoutUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/orders')
@@ -26,6 +26,15 @@ error_responses = {
     403: {'model': ErrorResponseSchema},
     409: {'model': ErrorResponseSchema},
     422: {'model': CartValidationResponseSchema},
+    503: {'model': ErrorResponseSchema},
+}
+
+
+cancel_error_responses = {
+    401: {'model': ErrorResponseSchema},
+    403: {'model': ErrorResponseSchema},
+    404: {'model': ErrorResponseSchema},
+    409: {'model': ErrorResponseSchema},
     503: {'model': ErrorResponseSchema},
 }
 
@@ -50,3 +59,18 @@ async def create_order(
     )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return order
+
+
+@router.post(
+    '/{order_id}/cancel',
+    response_model=OrderResponseSchema,
+    responses=cancel_error_responses,
+)
+@inject
+async def cancel_order(
+    order_id: UUID,
+    use_case: FromDishka[CancelOrderUseCase],
+    body: CancelRequestSchema | None = None,
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
+) -> OrderResponseSchema:
+    return await use_case(order_id, current_user, reason=body.reason if body else None)
