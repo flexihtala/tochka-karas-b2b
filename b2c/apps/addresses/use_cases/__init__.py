@@ -1,0 +1,4 @@
+from .create_address import CreateAddressUseCase as CreateAddressUseCase
+from .delete_address import DeleteAddressUseCase as DeleteAddressUseCase
+from .list_addresses import ListAddressesUseCase as ListAddressesUseCase
+from .update_address import UpdateAddressUseCase as UpdateAddressUseCase
