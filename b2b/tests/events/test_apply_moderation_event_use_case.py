@@ -116,7 +116,8 @@ async def test_moderated_event_clears_blocking_data():
     assert updated_product.status == ProductStatus.MODERATED
     assert updated_product.blocking_reason_id is None
     assert updated_product.moderator_comment is None
-    assert updated_product.field_reports is None
+    # field_reports NOT NULL: «очищено» = пустой список, а не None.
+    assert updated_product.field_reports == []
 
     # На MODERATED — никаких каскадных событий в B2C.
     assert outbox.enqueued == []

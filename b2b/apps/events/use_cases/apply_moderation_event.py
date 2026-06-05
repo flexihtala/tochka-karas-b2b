@@ -107,7 +107,8 @@ class ApplyModerationEventUseCase:
                 status=ProductStatus.MODERATED,
                 blocking_reason_id=None,
                 moderator_comment=None,
-                field_reports=None,
+                # field_reports NOT NULL (server_default '[]') — очищаем пустым списком, не None.
+                field_reports=[],
             )
         )
         if updated is None:
@@ -123,9 +124,10 @@ class ApplyModerationEventUseCase:
         moderator_comment: str | None,
         field_reports: list[Any] | None,
     ) -> ProductReadSchema:
-        serialized_reports: list[dict[str, Any]] | None
+        serialized_reports: list[dict[str, Any]]
         if field_reports is None:
-            serialized_reports = None
+            # field_reports NOT NULL — отсутствие замечаний пишем пустым списком, не None.
+            serialized_reports = []
         else:
             serialized_reports = [
                 {
