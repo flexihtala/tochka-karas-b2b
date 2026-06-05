@@ -34,6 +34,7 @@ class CartItemCreateSchema(CreateUUIDSchema):
 
     cart_id: UUID
     sku_id: UUID
+    product_id: UUID | None = None
     quantity: int
 
 
@@ -42,6 +43,7 @@ class CartItemReadSchema(ReadUUIDSchema):
 
     cart_id: UUID
     sku_id: UUID
+    product_id: UUID | None
     quantity: int
     created_at: datetime
     updated_at: datetime
@@ -52,4 +54,5 @@ class CartItemUpdateSchema(UpdateUUIDSchema):
 
     cart_id: UUID | None = None
     sku_id: UUID | None = None
+    product_id: UUID | None = None
     quantity: int | None = None

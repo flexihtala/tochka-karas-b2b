@@ -1,28 +1,151 @@
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
+
+import httpx
 
 from apps.cart.enums import UnavailableReason
+from apps.cart.errors import B2BUnavailableError
 from apps.cart.repositories import CartItemRepository, CartRepository
 from apps.cart.schemas.db import CartItemReadSchema, CartReadSchema
-from apps.cart.schemas.response import CartItemResponseSchema, CartResponseSchema
+from apps.cart.schemas.response import CartItemResponseSchema, CartResponseSchema, ImageRefSchema
 from shared.http_clients import ServiceClient, ServiceClientError
+
+
+def _pick_image(sku: dict, product: dict) -> ImageRefSchema | None:
+    """Первое изображение SKU, иначе первое изображение товара (по списку как есть)."""
+    for source in (sku.get('images'), product.get('images')):
+        if source:
+            first = source[0]
+            try:
+                return ImageRefSchema(
+                    id=UUID(str(first['id'])),
+                    url=str(first['url']),
+                    ordering=int(first.get('ordering', 0)),
+                )
+            except KeyError, ValueError, TypeError:
+                continue
+    return None
+
+
+def enrich_cart(
+    cart: CartReadSchema,
+    items: list[CartItemReadSchema],
+    products_by_id: dict[UUID, dict],
+) -> CartResponseSchema:
+    """Собирает CartResponseSchema из cart_items + B2B-карточек товаров.
+
+    Маппинг доступности (см. Flow B2C-8 §"Unavailable reasons"):
+    - SKU найден в товаре и active_quantity > 0 → доступна, reason None.
+    - SKU найден, active_quantity == 0 → is_available False, OUT_OF_STOCK.
+    - товар есть, но sku_id не среди product.skus → is_available False, OUT_OF_STOCK.
+    - product_id отсутствует в batch-выдаче → is_available False, PRODUCT_DELETED
+      (B2B-витрина скрывает причину; точное blocked/on_moderation детектирование
+      придёт через события товаров B2B в отдельном квесте).
+    Для недоступных позиций line_total = 0 и они не входят в subtotal.
+    """
+    enriched: list[CartItemResponseSchema] = []
+    items_count = 0
+    subtotal = 0
+    is_valid = True
+
+    for item in items:
+        items_count += item.quantity
+        enriched_item = _enrich_item(item, products_by_id)
+        enriched.append(enriched_item)
+
+        if enriched_item.is_available:
+            subtotal += enriched_item.line_total
+            if enriched_item.quantity > enriched_item.available_quantity:
+                is_valid = False
+        else:
+            is_valid = False
+
+    return CartResponseSchema(
+        items=enriched,
+        items_count=items_count,
+        subtotal=subtotal,
+        is_valid=is_valid,
+        id=cart.id,
+        updated_at=cart.updated_at,
+    )
+
+
+def _enrich_item(item: CartItemReadSchema, products_by_id: dict[UUID, dict]) -> CartItemResponseSchema:
+    product = products_by_id.get(item.product_id) if item.product_id is not None else None
+    if product is None:
+        # Товар отсутствует в видимой выдаче B2B → снят с продажи / удалён.
+        return CartItemResponseSchema(
+            sku_id=item.sku_id,
+            product_id=item.product_id or item.sku_id,
+            name='',
+            quantity=item.quantity,
+            unit_price=0,
+            line_total=0,
+            available_quantity=0,
+            is_available=False,
+            unavailable_reason=UnavailableReason.PRODUCT_DELETED,
+        )
+
+    sku = _find_sku(product, item.sku_id)
+    if sku is None:
+        # Товар виден, но конкретный SKU больше не предлагается → трактуем как нет в наличии.
+        return CartItemResponseSchema(
+            sku_id=item.sku_id,
+            product_id=item.product_id or item.sku_id,
+            name=str(product.get('title', '')),
+            quantity=item.quantity,
+            unit_price=0,
+            line_total=0,
+            available_quantity=0,
+            is_available=False,
+            unavailable_reason=UnavailableReason.OUT_OF_STOCK,
+            image=_pick_image({}, product),
+        )
+
+    active_quantity = int(sku.get('active_quantity', 0))
+    unit_price = int(sku.get('price', 0))
+    name = f'{product.get("title", "")} {sku.get("name", "")}'.strip()
+    is_available = active_quantity > 0
+
+    return CartItemResponseSchema(
+        sku_id=item.sku_id,
+        product_id=UUID(str(sku['product_id'])),
+        name=name,
+        quantity=item.quantity,
+        unit_price=unit_price,
+        line_total=unit_price * item.quantity if is_available else 0,
+        available_quantity=active_quantity,
+        is_available=is_available,
+        sku_code=sku.get('article'),
+        image=_pick_image(sku, product),
+        unavailable_reason=None if is_available else UnavailableReason.OUT_OF_STOCK,
+    )
+
+
+def _find_sku(product: dict, sku_id: UUID) -> dict | None:
+    for raw in product.get('skus', []):
+        raw_id = raw.get('id') if isinstance(raw, dict) else None
+        if raw_id is None:
+            continue
+        try:
+            if UUID(str(raw_id)) == sku_id:
+                return raw
+        except ValueError:
+            continue
+    return None
 
 
 class GetCartUseCase:
     """GET /api/v1/cart — корзина с обогащением данных из B2B.
 
     Алгоритм (см. b2c-cart-flows.md, Flow B2C-8 §"Обогащение из B2B"):
-    1. Найти корзину по user_id / session_id.
-    2. Если корзины нет — вернуть пустой плейсхолдер (id берётся из идентичности).
-    3. Собрать sku_id из cart_items, дёрнуть B2B `GET /api/v1/skus?ids=...`.
-    4. Для каждого item:
-       - SKU в ответе и available_quantity > 0 → доступна, line_total = unit_price * qty.
-       - SKU в ответе, но BLOCKED → unavailable_reason = BLOCKED.
-       - SKU в ответе, available_quantity == 0 → unavailable_reason = OUT_OF_STOCK.
-       - SKU отсутствует в ответе → unavailable_reason = DELETED.
-    5. total_amount = сумма line_total ТОЛЬКО available-позиций.
+    1. Найти корзину по user_id / session_id; нет корзины/позиций → пустой ответ (без B2B).
+    2. Собрать distinct product_id позиций (null product_id → PRODUCT_DELETED при обогащении).
+    3. ОДИН batch `POST /api/v1/public/products/batch` {product_ids: [...]} → JSON-массив
+       видимых карточек товаров (с вложенными skus). Отсутствующие id молча опущены.
+    4. Для каждого item найти его SKU внутри product.skus → доступность/цена/итоги.
+    5. subtotal — только доступные; items_count — по всем; is_valid — все доступны и qty<=остаток.
 
-    Если B2B недоступен — ServiceClientError пробрасывается наружу (FastAPI вернёт 5xx).
+    Если B2B недоступен (сеть/5xx) → B2BUnavailableError (503), без кэша.
     """
 
     def __init__(
@@ -43,41 +166,14 @@ class GetCartUseCase:
     ) -> CartResponseSchema:
         cart = await self._find_cart(user_id=user_id, session_id=session_id)
         if cart is None:
-            return self._empty_cart(user_id=user_id, session_id=session_id)
+            return CartResponseSchema()
 
         items = await self.cart_item_repository.list_by_cart(cart.id)
         if not items:
-            return CartResponseSchema(
-                id=cart.id,
-                user_id=cart.user_id,
-                session_id=cart.session_id,
-                items=[],
-                total_amount=0,
-                items_count=0,
-                updated_at=cart.updated_at,
-            )
+            return CartResponseSchema(id=cart.id, updated_at=cart.updated_at)
 
-        sku_index = await self._fetch_sku_index([item.sku_id for item in items])
-
-        enriched: list[CartItemResponseSchema] = []
-        total_amount = 0
-        items_count = 0
-        for item in items:
-            enriched_item = self._enrich(item, sku_index)
-            enriched.append(enriched_item)
-            items_count += item.quantity
-            if enriched_item.unavailable_reason is None:
-                total_amount += enriched_item.line_total
-
-        return CartResponseSchema(
-            id=cart.id,
-            user_id=cart.user_id,
-            session_id=cart.session_id,
-            items=enriched,
-            total_amount=total_amount,
-            items_count=items_count,
-            updated_at=cart.updated_at,
-        )
+        products_by_id = await self._fetch_products(items)
+        return enrich_cart(cart, items, products_by_id)
 
     async def _find_cart(
         self,
@@ -90,87 +186,34 @@ class GetCartUseCase:
         assert session_id is not None
         return await self.cart_repository.get_by_session(session_id)
 
-    @staticmethod
-    def _empty_cart(*, user_id: UUID | None, session_id: str | None) -> CartResponseSchema:
-        now = datetime.now(UTC)
-        return CartResponseSchema(
-            id=uuid4(),
-            user_id=user_id,
-            session_id=session_id,
-            items=[],
-            total_amount=0,
-            items_count=0,
-            updated_at=now,
-        )
+    async def _fetch_products(self, items: list[CartItemReadSchema]) -> dict[UUID, dict]:
+        """Batch `POST /public/products/batch` → {product_id: product}.
 
-    async def _fetch_sku_index(self, sku_ids: list[UUID]) -> dict[UUID, dict]:
-        """Batch-запрос к B2B `GET /api/v1/skus?ids=...` → {sku_id: {price, title, available_quantity, blocked}}.
-
-        Контракт B2B: возвращает только existing SKU (удалённые отсутствуют), каждый
-        с полями `id`, `title`, `price` (копейки), `available_quantity`, `blocked` (опц.).
+        ServiceClient возвращает распарсенный JSON; для этого эндпоинта это МАССИВ
+        (list), а не dict — поэтому не предполагаем .get(). Отсутствующие товары
+        просто не попадают в индекс → трактуются как PRODUCT_DELETED.
         """
-        if not sku_ids:
+        product_ids = sorted({item.product_id for item in items if item.product_id is not None})
+        if not product_ids:
             return {}
 
         try:
-            payload = await self.b2b_client.get('/api/v1/skus', params={'ids': ','.join(str(s) for s in sku_ids)})
-        except ServiceClientError:
-            raise
+            payload = await self.b2b_client.post(
+                '/api/v1/public/products/batch',
+                json={'product_ids': [str(pid) for pid in product_ids]},
+            )
+        except ServiceClientError as exc:
+            raise B2BUnavailableError() from exc
+        except httpx.HTTPError as exc:
+            raise B2BUnavailableError() from exc
 
         index: dict[UUID, dict] = {}
-        for raw in payload.get('items', []):
-            raw_id = raw.get('id') if isinstance(raw, dict) else None
+        for product in payload if isinstance(payload, list) else []:
+            raw_id = product.get('id') if isinstance(product, dict) else None
             if raw_id is None:
                 continue
             try:
-                sku_id = UUID(str(raw_id))
+                index[UUID(str(raw_id))] = product
             except ValueError:
                 continue
-            index[sku_id] = raw
         return index
-
-    @staticmethod
-    def _enrich(item: CartItemReadSchema, sku_index: dict[UUID, dict]) -> CartItemResponseSchema:
-        raw = sku_index.get(item.sku_id)
-        if raw is None:
-            return CartItemResponseSchema(
-                id=item.id,
-                sku_id=item.sku_id,
-                quantity=item.quantity,
-                title=None,
-                unit_price=None,
-                available_quantity=None,
-                line_total=0,
-                unavailable_reason=UnavailableReason.DELETED,
-                created_at=item.created_at,
-                updated_at=item.updated_at,
-            )
-
-        title = raw.get('title')
-        unit_price = raw.get('price')
-        available_quantity = raw.get('available_quantity')
-        is_blocked = bool(raw.get('blocked', False))
-
-        if is_blocked:
-            reason: UnavailableReason | None = UnavailableReason.BLOCKED
-        elif available_quantity is None or int(available_quantity) <= 0:
-            reason = UnavailableReason.OUT_OF_STOCK
-        else:
-            reason = None
-
-        line_total = 0
-        if reason is None and unit_price is not None:
-            line_total = int(unit_price) * item.quantity
-
-        return CartItemResponseSchema(
-            id=item.id,
-            sku_id=item.sku_id,
-            quantity=item.quantity,
-            title=title,
-            unit_price=int(unit_price) if unit_price is not None else None,
-            available_quantity=int(available_quantity) if available_quantity is not None else None,
-            line_total=line_total,
-            unavailable_reason=reason,
-            created_at=item.created_at,
-            updated_at=item.updated_at,
-        )
