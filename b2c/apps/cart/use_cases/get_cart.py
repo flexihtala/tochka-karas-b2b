@@ -13,16 +13,24 @@ from shared.http_clients import ServiceClient, ServiceClientError
 def _pick_image(sku: dict, product: dict) -> ImageRefSchema | None:
     """Первое изображение SKU, иначе первое изображение товара (по списку как есть)."""
     for source in (sku.get('images'), product.get('images')):
-        if source:
-            first = source[0]
-            try:
-                return ImageRefSchema(
-                    id=UUID(str(first['id'])),
-                    url=str(first['url']),
-                    ordering=int(first.get('ordering', 0)),
-                )
-            except KeyError, ValueError, TypeError:
-                continue
+        if not source:
+            continue
+        first = source[0]
+        if not isinstance(first, dict):
+            continue
+        image_id = first.get('id')
+        url = first.get('url')
+        if image_id is None or url is None:
+            continue
+        ordering = first.get('ordering')
+        try:
+            return ImageRefSchema(
+                id=UUID(str(image_id)),
+                url=str(url),
+                ordering=int(ordering) if ordering is not None else 0,
+            )
+        except ValueError:
+            continue
     return None
 
 
