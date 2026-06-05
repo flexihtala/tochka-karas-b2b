@@ -19,12 +19,24 @@ class ServiceClientError(Exception):
 
 
 class ServiceClient:
-    """HTTP-клиент к одному сервису (один base_url + один X-Service-Key)."""
+    """HTTP-клиент к одному сервису (один base_url + один X-Service-Key).
 
-    def __init__(self, base_url: str, service_key: str, timeout: float = 5.0):
+    `transport` опциональный: тесты могут передать `httpx.MockTransport`,
+    чтобы интерсептить исходящие запросы — при этом весь остальной код
+    (заголовки, разбор JSON, ServiceClientError) выполняется как в проде.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        service_key: str,
+        timeout: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.base_url = base_url.rstrip('/')
         self.service_key = service_key
         self.timeout = timeout
+        self.transport = transport
 
     async def _request(
         self,
@@ -40,7 +52,11 @@ class ServiceClient:
         if idempotency_key:
             headers['Idempotency-Key'] = idempotency_key
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        client_kwargs: dict[str, Any] = {'timeout': self.timeout}
+        if self.transport is not None:
+            client_kwargs['transport'] = self.transport
+
+        async with httpx.AsyncClient(**client_kwargs) as client:
             response = await client.request(method, url, json=json, params=params, headers=headers)
 
         if response.status_code >= 400:
