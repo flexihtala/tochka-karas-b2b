@@ -111,23 +111,25 @@ class CheckoutUseCase:
         lines = await self._enrich_and_validate(cart_items, data.items_snapshot)
         total_amount = sum(line.line_total for line in lines)
 
-        # 4. order_id генерируем ДО резерва — B2B требует его в payload.
-        order_id = uuid4()
-
-        # 5. Reserve all-or-nothing. 409 → ReserveFailedError, 5xx/timeout → B2BUnavailableError.
-        await self.b2b_client.reserve(
-            idempotency_key=idempotency_key,
-            order_id=order_id,
-            items=[{'sku_id': str(line.sku_id), 'quantity': line.quantity} for line in lines],
-        )
-
-        # 6. Валидация адреса и способа оплаты (владение проверяется строго).
+        # 4. Валидация адреса и способа оплаты (владение) — ДО резерва: дешёвые
+        #    локальные проверки должны фейлить быстро, не оставляя висячий резерв в B2B.
         address = await self.address_repository.get_or_none(data.address_id)
         if address is None or address.buyer_id != current_user.id:
             raise InvalidAddressError()
         payment_method = await self.payment_method_repository.get_or_none(data.payment_method_id)
         if payment_method is None or payment_method.buyer_id != current_user.id:
             raise InvalidPaymentMethodError()
+
+        # 5. order_id генерируем ДО резерва — B2B требует его в payload.
+        order_id = uuid4()
+
+        # 6. Reserve all-or-nothing. 409 → ReserveFailedError, 5xx/timeout → B2BUnavailableError.
+        #    Выполняется последним из side-effect'ов: всё дешёвое уже провалидировано.
+        await self.b2b_client.reserve(
+            idempotency_key=idempotency_key,
+            order_id=order_id,
+            items=[{'sku_id': str(line.sku_id), 'quantity': line.quantity} for line in lines],
+        )
 
         # 7. Создать Order(status=PAID) + OrderItem'ы (атомарно). Гонка по UNIQUE → повтор.
         order_create = OrderCreateSchema(
