@@ -1,6 +1,7 @@
 from dishka import Provider, Scope, provide
 
 from apps.auth.depends import AuthProvider
+from apps.inventory.depends import InventoryProvider
 from apps.outbox.depends import OutboxProvider
 from apps.products.depends import ProductsProvider
 from apps.public.depends import PublicProvider
@@ -26,4 +27,5 @@ providers = [
     SKUsProvider(),
     PublicProvider(),
     OutboxProvider(),
+    InventoryProvider(),
 ]

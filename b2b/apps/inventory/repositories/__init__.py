@@ -1,0 +1,1 @@
+from .inventory_repository import InventoryRepository as InventoryRepository
