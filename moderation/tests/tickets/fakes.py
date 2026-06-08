@@ -150,6 +150,24 @@ class FakeTicketRepository:
         _ = session
         return await self.update(data)
 
+    async def get_active_for_product(self, product_id: UUID) -> TicketReadSchema | None:
+        """Активный (не ARCHIVED) тикет для товара. product_id уникален → не больше одного."""
+        active = [t for t in self.by_id.values() if t.product_id == product_id and t.status != TicketStatus.ARCHIVED]
+        if not active:
+            return None
+        active.sort(key=lambda t: t.created_at, reverse=True)
+        return active[0]
+
+    async def archive_for_product(self, product_id: UUID) -> int:
+        """ARCHIVE все не-ARCHIVED тикеты товара (включая HARD_BLOCKED). Идемпотентно."""
+        affected = 0
+        for ticket in self.by_id.values():
+            if ticket.product_id == product_id and ticket.status != TicketStatus.ARCHIVED:
+                ticket.status = TicketStatus.ARCHIVED
+                self.updated.append(TicketUpdateSchema(id=ticket.id, status=TicketStatus.ARCHIVED))
+                affected += 1
+        return affected
+
 
 class FakeSessionManager:
     """Минимальный stub: async-CM возвращает себя; реальный коммит здесь не нужен,

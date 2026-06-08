@@ -8,6 +8,7 @@ from apps.tickets.errors import (
     TicketNoSkusError,
     TicketNotFoundError,
     TicketNotOwnerError,
+    TicketTerminalError,
     TicketWrongStatusError,
 )
 from apps.tickets.repositories import TicketRepository
@@ -49,6 +50,10 @@ class ApproveTicketUseCase:
         ticket = await self.ticket_repository.get_or_none(ticket_id)
         if ticket is None:
             raise TicketNotFoundError()
+
+        # HARD_BLOCKED — терминальный статус: 403 (необратимость), не generic 409.
+        if ticket.status == TicketStatus.HARD_BLOCKED:
+            raise TicketTerminalError()
 
         if ticket.status != TicketStatus.IN_REVIEW:
             raise TicketWrongStatusError()

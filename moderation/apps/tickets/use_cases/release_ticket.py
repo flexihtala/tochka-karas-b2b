@@ -1,7 +1,12 @@
 from uuid import UUID
 
 from apps.tickets.enums import TicketStatus
-from apps.tickets.errors import TicketNotAssignedError, TicketNotFoundError, TicketWrongStatusError
+from apps.tickets.errors import (
+    TicketNotAssignedError,
+    TicketNotFoundError,
+    TicketTerminalError,
+    TicketWrongStatusError,
+)
 from apps.tickets.repositories import TicketRepository
 from apps.tickets.schemas.db import TicketUpdateSchema
 from apps.tickets.schemas.response import TicketResponseSchema
@@ -28,6 +33,10 @@ class ReleaseTicketUseCase:
         ticket = await self.ticket_repository.get_or_none(ticket_id)
         if ticket is None:
             raise TicketNotFoundError()
+
+        # HARD_BLOCKED — терминальный статус: 403 (необратимость), не generic 409.
+        if ticket.status == TicketStatus.HARD_BLOCKED:
+            raise TicketTerminalError()
 
         if ticket.status != TicketStatus.IN_REVIEW:
             raise TicketWrongStatusError()

@@ -104,3 +104,39 @@ class TicketRepository(
         result = await session.execute(stmt)
         model = result.scalar_one_or_none()
         return self.model_validate(model) if model else None
+
+    async def get_active_for_product(self, product_id: UUID) -> TicketReadSchema | None:
+        """Активный (не ARCHIVED) тикет для товара — для обработки PRODUCT_EDITED от B2B.
+
+        product_id уникален в таблице tickets, поэтому активная запись не больше одной.
+        HARD_BLOCKED здесь считается активной (терминальной) — вызывающий use-case сам
+        решает игнорировать её (EDITED над HARD_BLOCKED — no-op).
+        """
+        stmt = (
+            select(Ticket)
+            .where(Ticket.product_id == product_id)
+            .where(Ticket.status != TicketStatus.ARCHIVED.value)
+            .order_by(Ticket.created_at.desc())
+            .limit(1)
+        )
+        async with self.session_manager.get_session() as session:
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+        return self.model_validate(model) if model else None
+
+    async def archive_for_product(self, product_id: UUID) -> int:
+        """ARCHIVE все НЕ ARCHIVED тикеты товара — для обработки PRODUCT_DELETED от B2B.
+
+        Идемпотентно: повторный DELETE по уже архивированным тикетам обновит 0 строк.
+        HARD_BLOCKED тикеты тоже архивируются (запись модерации закрывается; в B2B товар
+        остаётся заблокированным). Возвращает число затронутых строк.
+        """
+        stmt = (
+            update(Ticket)
+            .where(Ticket.product_id == product_id)
+            .where(Ticket.status != TicketStatus.ARCHIVED.value)
+            .values(status=TicketStatus.ARCHIVED.value)
+        )
+        async with self.session_manager.get_session() as session:
+            result = await session.execute(stmt)
+        return result.rowcount

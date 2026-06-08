@@ -5,7 +5,12 @@ from apps.blocking_reasons.errors import BlockingReasonNotFoundError
 from apps.blocking_reasons.repositories import BlockingReasonRepository
 from apps.outbox.repositories import ModerationOutboxRepository
 from apps.tickets.enums import TicketStatus
-from apps.tickets.errors import TicketNotAssignedError, TicketNotFoundError, TicketWrongStatusError
+from apps.tickets.errors import (
+    TicketNotAssignedError,
+    TicketNotFoundError,
+    TicketTerminalError,
+    TicketWrongStatusError,
+)
 from apps.tickets.repositories import TicketRepository
 from apps.tickets.schemas.db import TicketUpdateSchema
 from apps.tickets.schemas.request import BlockTicketRequestSchema
@@ -49,6 +54,10 @@ class BlockTicketUseCase:
         ticket = await self.ticket_repository.get_or_none(ticket_id)
         if ticket is None:
             raise TicketNotFoundError()
+
+        # HARD_BLOCKED — терминальный статус: 403 (необратимость), не generic 409.
+        if ticket.status == TicketStatus.HARD_BLOCKED:
+            raise TicketTerminalError()
 
         if ticket.status != TicketStatus.IN_REVIEW:
             raise TicketWrongStatusError()
@@ -95,11 +104,14 @@ class BlockTicketUseCase:
             if data.field_reports:
                 payload['field_reports'] = [fr.model_dump(mode='json') for fr in data.field_reports]
 
+            # B2B-контракт (ModerationEventRequest, US-B2B-09) знает только event_type
+            # MODERATED|BLOCKED. Жёсткость передаётся ОТДЕЛЬНЫМ булевым полем hard_block
+            # в payload — поэтому event_type всегда BLOCKED (и для soft, и для hard).
             await self.outbox_repository.enqueue(
                 session,
                 OutboxEnqueueSchema(
                     idempotency_key=idempotency_key,
-                    event_type='HARD_BLOCKED' if hard_block else 'BLOCKED',
+                    event_type='BLOCKED',
                     target_service=ServiceName.B2B,
                     payload=payload,
                 ),
