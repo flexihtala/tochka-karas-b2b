@@ -1,7 +1,10 @@
 from dishka import Provider, Scope, provide
 
 from apps.auth.depends import AuthProvider
+from apps.events.depends import EventsProvider
+from apps.inbox.depends import InboxProvider
 from apps.moderators.depends import ModeratorsProvider
+from apps.stats.depends import StatsProvider
 from settings import ModerationSettings, settings
 from shared.db import SessionManager
 
@@ -16,4 +19,11 @@ class CoreProvider(Provider):
         return SessionManager(settings)
 
 
-providers = [CoreProvider(), AuthProvider(), ModeratorsProvider()]
+providers = [
+    CoreProvider(),
+    AuthProvider(),
+    ModeratorsProvider(),
+    InboxProvider(),
+    EventsProvider(),
+    StatsProvider(),
+]
