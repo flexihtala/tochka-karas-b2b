@@ -6,8 +6,8 @@ from apps.tickets.b2b_client import ModerationB2BClient
 from apps.tickets.enums import TicketStatus
 from apps.tickets.errors import (
     TicketNoSkusError,
-    TicketNotAssignedError,
     TicketNotFoundError,
+    TicketNotOwnerError,
     TicketWrongStatusError,
 )
 from apps.tickets.repositories import TicketRepository
@@ -54,7 +54,7 @@ class ApproveTicketUseCase:
             raise TicketWrongStatusError()
 
         if role != UserRole.ADMIN and ticket.claimed_by != moderator_id:
-            raise TicketNotAssignedError()
+            raise TicketNotOwnerError()
 
         # Прекондишн: товар в B2B должен всё ещё содержать хотя бы один SKU.
         # B2B — отдельный сервис со своей БД, ходим только по API. На 5xx/timeout

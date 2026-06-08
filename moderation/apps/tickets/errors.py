@@ -18,10 +18,21 @@ class TicketWrongStatusError(TicketError):
 
 
 class TicketNotAssignedError(TicketError):
-    """403 — тикет назначен другому модератору (вызывающий не владелец и не ADMIN)."""
+    """409 — тикет принадлежит другому модератору (block/release; spec moderation.yaml: 409)."""
 
     def __init__(self, message: str = 'Тикет назначен другому модератору'):
-        super().__init__('TICKET_NOT_ASSIGNED', message, 403)
+        super().__init__('TICKET_NOT_ASSIGNED', message, 409)
+
+
+class TicketNotOwnerError(TicketError):
+    """403 — approve чужой карточки.
+
+    Отдельная ошибка от TicketNotAssignedError (409): канон approve-product (шаг 5)
+    и DoD US-MOD-03 требуют для approve именно 403, тогда как спека block/release — 409.
+    """
+
+    def __init__(self, message: str = 'Эта карточка модерации закреплена за другим модератором'):
+        super().__init__('TICKET_NOT_OWNER', message, 403)
 
 
 class TicketNoSkusError(TicketError):

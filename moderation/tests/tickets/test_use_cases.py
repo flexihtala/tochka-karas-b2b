@@ -8,6 +8,7 @@ from apps.tickets.errors import (
     TicketNoSkusError,
     TicketNotAssignedError,
     TicketNotFoundError,
+    TicketNotOwnerError,
     TicketWrongStatusError,
 )
 from apps.tickets.schemas.request import BlockTicketRequestSchema, FieldReportSchema
@@ -131,7 +132,7 @@ async def test_approve_transitions_to_moderated_and_emits_event():
 @pytest.mark.anyio
 async def test_approve_others_card_returns_403():
     """Тикет захвачен ДРУГИМ модератором, вызывающий не ADMIN → 403
-    (TicketNotAssignedError). B2B не дёргается, outbox пуст."""
+    (TicketNotOwnerError). B2B не дёргается, outbox пуст."""
     repo = FakeTicketRepository()
     outbox = FakeOutboxRepository()
     b2b = FakeModerationB2BClient()
@@ -146,7 +147,7 @@ async def test_approve_others_card_returns_403():
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(TicketNotAssignedError) as err:
+    with pytest.raises(TicketNotOwnerError) as err:
         await use_case(ticket.id, other_moderator, UserRole.MODERATOR)
 
     assert err.value.status_code == 403
