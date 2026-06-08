@@ -60,6 +60,30 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov-report=term .
 
+  test-b2c:
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: ./b2c
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: install_uv
+        run: |
+          pip install uv
+          uv sync --all-packages --all-extras
+      - name: test b2c
+        run: |
+          uv run pytest \
+            --cov=. \
+            --no-cov-on-fail \
+            --junitxml=report.xml \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term .
+
   test-moderation:
     runs-on: ubuntu-latest
     needs: lint

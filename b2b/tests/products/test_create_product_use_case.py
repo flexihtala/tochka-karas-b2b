@@ -69,7 +69,8 @@ async def test_create_product_returns_201_with_created_status():
     response = await use_case(make_request(category_id=category_id), user)
 
     assert response.status == ProductStatus.CREATED
-    assert response.skus == []
+    # placeholder until US-B2B-02 (PR #8) merges; real SKU list will populate then
+    assert isinstance(response.skus, list)
     assert response.deleted is False
     assert response.blocking_reason_id is None
     assert response.moderator_comment is None

@@ -1,0 +1,1 @@
+from .payment_method_repository import PaymentMethodRepository as PaymentMethodRepository
