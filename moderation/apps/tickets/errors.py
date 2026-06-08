@@ -24,6 +24,18 @@ class TicketNotAssignedError(TicketError):
         super().__init__('TICKET_NOT_ASSIGNED', message, 409)
 
 
+class TicketTerminalError(TicketError):
+    """403 — тикет в терминальном статусе HARD_BLOCKED, любые мутации запрещены.
+
+    US-MOD-05 (canon moderation-flows.md#hard-block, «Необратимость»): HARD_BLOCKED —
+    терминальный статус. approve/block/release над таким тикетом отклоняются с 403
+    (а не generic 409): продавец не может исправить, модератор не может пере-решить.
+    """
+
+    def __init__(self, message: str = 'Тикет в терминальном статусе HARD_BLOCKED, операция запрещена'):
+        super().__init__('TICKET_TERMINAL', message, 403)
+
+
 class TicketNotOwnerError(TicketError):
     """403 — approve чужой карточки.
 
