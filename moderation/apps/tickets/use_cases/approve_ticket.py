@@ -2,8 +2,14 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from apps.outbox.repositories import ModerationOutboxRepository
+from apps.tickets.b2b_client import ModerationB2BClient
 from apps.tickets.enums import TicketStatus
-from apps.tickets.errors import TicketNotAssignedError, TicketNotFoundError, TicketWrongStatusError
+from apps.tickets.errors import (
+    TicketNoSkusError,
+    TicketNotFoundError,
+    TicketNotOwnerError,
+    TicketWrongStatusError,
+)
 from apps.tickets.repositories import TicketRepository
 from apps.tickets.schemas.db import TicketUpdateSchema
 from apps.tickets.schemas.response import TicketResponseSchema
@@ -16,19 +22,21 @@ from shared.types import ServiceName
 class ApproveTicketUseCase:
     """POST /api/v1/tickets/{id}/approve — одобрить тикет.
 
-    Условия: status == IN_REVIEW и моратор владеет тикетом (или ADMIN). В одной
-    транзакции UPDATE tickets + INSERT outbox (event MODERATED для b2b). Доставку
-    в b2b делает OutboxWorker в M3.
+    Условия: status == IN_REVIEW, модератор владеет тикетом (или ADMIN), и у товара
+    в B2B всё ещё есть хотя бы один SKU. В одной транзакции UPDATE tickets + INSERT
+    outbox (event MODERATED для b2b). Доставку в b2b делает OutboxWorker в M3.
     """
 
     def __init__(
         self,
         ticket_repository: TicketRepository,
         outbox_repository: ModerationOutboxRepository,
+        b2b_client: ModerationB2BClient,
         session_manager: SessionManager,
     ):
         self.ticket_repository = ticket_repository
         self.outbox_repository = outbox_repository
+        self.b2b_client = b2b_client
         self.session_manager = session_manager
 
     async def __call__(
@@ -46,7 +54,15 @@ class ApproveTicketUseCase:
             raise TicketWrongStatusError()
 
         if role != UserRole.ADMIN and ticket.claimed_by != moderator_id:
-            raise TicketNotAssignedError()
+            raise TicketNotOwnerError()
+
+        # Прекондишн: товар в B2B должен всё ещё содержать хотя бы один SKU.
+        # B2B — отдельный сервис со своей БД, ходим только по API. На 5xx/timeout
+        # клиент поднимет B2BUnavailableError (503) → статус останется IN_REVIEW,
+        # модератор повторит approve позже.
+        product = await self.b2b_client.get_product(ticket.product_id)
+        if product is None or not product.get('skus'):
+            raise TicketNoSkusError()
 
         idempotency_key = uuid4()
         now = datetime.now(UTC)

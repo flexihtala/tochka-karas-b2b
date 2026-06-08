@@ -183,3 +183,22 @@ class FakeOutboxRepository:
     async def enqueue(self, session: Any, data: OutboxEnqueueSchema):
         self.enqueued.append(data)
         return data
+
+
+class FakeModerationB2BClient:
+    """Фейк B2B-клиента — мокаем ТОЛЬКО HTTP-границу к B2B.
+
+    `get_product` отдаёт сконфигурированный товар (по умолчанию — с одним SKU).
+    Тесты подменяют `product` на None / товар без skus, чтобы прогнать прекондишн.
+    Фиксирует вызовы в `calls`, чтобы проверять, что B2B НЕ дёргается до того,
+    как пройдут проверки статуса/владельца.
+    """
+
+    def __init__(self, product: dict[str, Any] | None = ...):  # type: ignore[assignment]
+        # По умолчанию — валидный товар с одним SKU (happy path).
+        self.product: dict[str, Any] | None = {'skus': [{'id': str(uuid4())}]} if product is ... else product
+        self.calls: list[UUID] = []
+
+    async def get_product(self, product_id: UUID) -> dict[str, Any] | None:
+        self.calls.append(product_id)
+        return self.product
