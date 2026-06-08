@@ -5,7 +5,10 @@ from sqlalchemy import pool
 
 from alembic import context
 from apps.auth import models as auth_models
+from apps.blocking_reasons import models as blocking_reasons_models
 from apps.moderators import models as moderators_models
+from apps.outbox import models as outbox_models
+from apps.tickets import models as tickets_models
 from settings import settings
 from shared.db import Base
 
@@ -20,6 +23,9 @@ if config.config_file_name is not None:
 
 auth_models
 moderators_models
+blocking_reasons_models
+tickets_models
+outbox_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
