@@ -23,6 +23,8 @@ class ModerationSettings(BaseSettings):
     # Service-to-service auth: ключи, которыми принимаем callback'и от b2b.
     b2b_to_mod_key: str = Field(default='dev-b2b-to-mod-key-change-me', alias='B2B_TO_MOD_KEY')
     mod_to_b2b_key: str = Field(default='dev-mod-to-b2b-key-change-me', alias='MOD_TO_B2B_KEY')
+    # Base URL of the B2B service — moderation talks to B2B only via API (own DB).
+    b2b_url: str = Field(default='http://localhost:8001', alias='B2B_URL')
 
     @property
     def sync_database_url(self) -> str:

@@ -4,14 +4,25 @@ import pytest
 
 from apps.blocking_reasons.errors import BlockingReasonNotFoundError
 from apps.tickets.enums import TicketStatus
-from apps.tickets.errors import TicketNotAssignedError, TicketNotFoundError, TicketWrongStatusError
+from apps.tickets.errors import (
+    TicketNoSkusError,
+    TicketNotAssignedError,
+    TicketNotFoundError,
+    TicketWrongStatusError,
+)
 from apps.tickets.schemas.request import BlockTicketRequestSchema, FieldReportSchema
 from apps.tickets.use_cases.approve_ticket import ApproveTicketUseCase
 from apps.tickets.use_cases.block_ticket import BlockTicketUseCase
 from apps.tickets.use_cases.release_ticket import ReleaseTicketUseCase
 from shared.auth_lib import UserRole
 from tests.blocking_reasons.fakes import FakeBlockingReasonRepository, make_blocking_reason
-from tests.tickets.fakes import FakeOutboxRepository, FakeSessionManager, FakeTicketRepository, make_ticket
+from tests.tickets.fakes import (
+    FakeModerationB2BClient,
+    FakeOutboxRepository,
+    FakeSessionManager,
+    FakeTicketRepository,
+    make_ticket,
+)
 
 
 # ----------------------------- RELEASE -----------------------------
@@ -85,15 +96,19 @@ async def test_release_409_when_wrong_status():
 
 
 @pytest.mark.anyio
-async def test_approve_marks_approved_and_enqueues_moderated_event():
+async def test_approve_transitions_to_moderated_and_emits_event():
+    """Happy path: тикет IN_REVIEW, владелец-модератор, у товара в B2B есть SKU →
+    статус APPROVED + ровно одно outbox-событие MODERATED для b2b с product_id."""
     repo = FakeTicketRepository()
     outbox = FakeOutboxRepository()
+    b2b = FakeModerationB2BClient(product={'skus': [{'id': str(uuid4())}]})
     moderator_id = uuid4()
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
     repo.add(ticket)
     use_case = ApproveTicketUseCase(
         ticket_repository=repo,
         outbox_repository=outbox,
+        b2b_client=b2b,
         session_manager=FakeSessionManager(),
     )
 
@@ -102,6 +117,8 @@ async def test_approve_marks_approved_and_enqueues_moderated_event():
     assert result.status == TicketStatus.APPROVED
     assert result.decision_at is not None
     assert repo.by_id[ticket.id].status == TicketStatus.APPROVED
+    # B2B was consulted for the product (SKU precondition).
+    assert b2b.calls == [ticket.product_id]
     # Outbox enqueued exactly one MODERATED event for b2b.
     assert len(outbox.enqueued) == 1
     event = outbox.enqueued[0]
@@ -112,36 +129,90 @@ async def test_approve_marks_approved_and_enqueues_moderated_event():
 
 
 @pytest.mark.anyio
-async def test_approve_rejects_when_not_owner_and_not_admin():
+async def test_approve_others_card_returns_403():
+    """Тикет захвачен ДРУГИМ модератором, вызывающий не ADMIN → 403
+    (TicketNotAssignedError). B2B не дёргается, outbox пуст."""
     repo = FakeTicketRepository()
+    outbox = FakeOutboxRepository()
+    b2b = FakeModerationB2BClient()
     owner_id = uuid4()
     other_moderator = uuid4()
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=owner_id)
     repo.add(ticket)
     use_case = ApproveTicketUseCase(
         ticket_repository=repo,
-        outbox_repository=FakeOutboxRepository(),
+        outbox_repository=outbox,
+        b2b_client=b2b,
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(TicketNotAssignedError):
+    with pytest.raises(TicketNotAssignedError) as err:
         await use_case(ticket.id, other_moderator, UserRole.MODERATOR)
+
+    assert err.value.status_code == 403
+    assert b2b.calls == []
+    assert outbox.enqueued == []
 
 
 @pytest.mark.anyio
-async def test_approve_409_when_status_not_in_review():
+async def test_approve_after_edited_returns_409():
+    """Тикет был IN_REVIEW, но продавец отредактировал карточку → тикет сброшен в
+    PENDING (claimed_by=None). approve по устаревшему review → 409, outbox пуст.
+
+    Сам сброс IN_REVIEW → PENDING выполняет обработчик ВХОДЯЩИХ B2B-событий
+    (отдельный квест модерации, вне скоупа US-MOD-03): seller-edit прилетает
+    событием, хендлер un-claim'ит тикет. Здесь мы лишь моделируем итоговое
+    состояние и проверяем, что approve корректно отвергает протухший review
+    существующей проверкой status != IN_REVIEW.
+    """
     repo = FakeTicketRepository()
+    outbox = FakeOutboxRepository()
+    b2b = FakeModerationB2BClient()
     moderator_id = uuid4()
-    ticket = make_ticket(status=TicketStatus.PENDING, claimed_by=moderator_id)
+    # Был IN_REVIEW у модератора → seller-edit сбросил в PENDING и снял claim.
+    ticket = make_ticket(status=TicketStatus.PENDING, claimed_by=None)
     repo.add(ticket)
     use_case = ApproveTicketUseCase(
         ticket_repository=repo,
-        outbox_repository=FakeOutboxRepository(),
+        outbox_repository=outbox,
+        b2b_client=b2b,
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(TicketWrongStatusError):
+    with pytest.raises(TicketWrongStatusError) as err:
         await use_case(ticket.id, moderator_id, UserRole.MODERATOR)
+
+    assert err.value.status_code == 409
+    assert b2b.calls == []
+    assert outbox.enqueued == []
+
+
+@pytest.mark.anyio
+async def test_approve_without_sku_returns_409():
+    """Тикет IN_REVIEW, владелец-модератор, но у товара в B2B нет SKU
+    (skus: []) → 409 (TicketNoSkusError). Статус не меняется, outbox пуст."""
+    repo = FakeTicketRepository()
+    outbox = FakeOutboxRepository()
+    b2b = FakeModerationB2BClient(product={'skus': []})
+    moderator_id = uuid4()
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = ApproveTicketUseCase(
+        ticket_repository=repo,
+        outbox_repository=outbox,
+        b2b_client=b2b,
+        session_manager=FakeSessionManager(),
+    )
+
+    with pytest.raises(TicketNoSkusError) as err:
+        await use_case(ticket.id, moderator_id, UserRole.MODERATOR)
+
+    assert err.value.status_code == 409
+    assert err.value.code == 'PRODUCT_HAS_NO_SKUS'
+    # B2B was consulted, but ticket stays IN_REVIEW and no event is emitted.
+    assert b2b.calls == [ticket.product_id]
+    assert repo.by_id[ticket.id].status == TicketStatus.IN_REVIEW
+    assert outbox.enqueued == []
 
 
 # ----------------------------- BLOCK -----------------------------
