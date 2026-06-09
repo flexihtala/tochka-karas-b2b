@@ -26,6 +26,7 @@ class FakeSKURepository:
         self.by_id: dict[UUID, SKUReadSchema] = {}
         self.created: list[SKUCreateSchema] = []
         self.updated: list[SKUUpdateSchema] = []
+        self.deleted_ids: list[UUID] = []
         self.count_by_product_overrides: dict[UUID, int] = {}
 
     def add(
@@ -41,7 +42,7 @@ class FakeSKURepository:
         active_quantity: int = 0,
         reserved_quantity: int = 0,
     ) -> UUID:
-        """Используется в edit-тестах: посадить уже существующий SKU."""
+        """Посадить уже существующий SKU (используется в edit/delete-тестах)."""
         sku_id = id or uuid4()
         now = datetime.now(UTC)
         sku = SKUReadSchema(
@@ -84,6 +85,10 @@ class FakeSKURepository:
 
     async def get_or_none(self, id_: UUID) -> SKUReadSchema | None:
         return self.by_id.get(id_)
+
+    async def delete(self, id_: UUID) -> bool:
+        self.deleted_ids.append(id_)
+        return self.by_id.pop(id_, None) is not None
 
     async def update(self, data: SKUUpdateSchema) -> SKUReadSchema | None:
         self.updated.append(data)
