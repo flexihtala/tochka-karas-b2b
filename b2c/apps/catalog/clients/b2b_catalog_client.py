@@ -21,17 +21,17 @@ class B2BCatalogClient:
         self.client = service_client
 
     async def list_products(self, params: dict[str, Any]) -> dict[str, Any]:
-        """GET /api/v1/catalog/products — листинг с фильтрами/сортировкой/поиском."""
-        return await self.client.get('/api/v1/catalog/products', params=params)
+        """GET /api/v1/public/products — листинг с фильтрами/сортировкой/поиском."""
+        return await self.client.get('/api/v1/public/products', params=params)
 
     async def get_facets(self, params: dict[str, Any]) -> dict[str, Any]:
-        """GET /api/v1/catalog/facets — фасеты с подсчётом по текущим фильтрам."""
-        return await self.client.get('/api/v1/catalog/facets', params=params)
+        """GET /api/v1/public/facets — фасеты с подсчётом по текущим фильтрам."""
+        return await self.client.get('/api/v1/public/facets', params=params)
 
     async def get_product(self, product_id: UUID) -> dict[str, Any]:
-        """GET /api/v1/catalog/products/{id} — карточка товара (B2C view)."""
-        return await self.client.get(f'/api/v1/catalog/products/{product_id}')
+        """GET /api/v1/public/products/{id} — карточка товара (B2C view)."""
+        return await self.client.get(f'/api/v1/public/products/{product_id}')
 
     async def get_similar(self, product_id: UUID, params: dict[str, Any]) -> dict[str, Any]:
-        """GET /api/v1/catalog/products/{id}/similar — похожие товары."""
-        return await self.client.get(f'/api/v1/catalog/products/{product_id}/similar', params=params)
+        """GET /api/v1/public/products/{id}/similar — похожие товары."""
+        return await self.client.get(f'/api/v1/public/products/{product_id}/similar', params=params)

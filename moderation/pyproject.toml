@@ -1,0 +1,57 @@
+[project]
+name = "moderation"
+version = "0.1.0"
+description = "NeoMarket Moderation service — модерация товаров (tochka-karas-b2b monorepo)"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic-settings>=2.7",
+    "psycopg2-binary>=2.9",
+    "dishka>=1.10.1",
+    "bcrypt>=4.2",
+    "pyjwt[crypto]>=2.10",
+    "greenlet>=3.2",
+    "httpx>=0.28",
+    "shared",
+]
+
+[tool.uv.sources]
+shared = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "anyio>=4.9.0",
+    "factory-boy>=3.3.3",
+    "freezegun>=1.5.5",
+    "mypy>=1.14.1",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "pytest-env>=1.1.5",
+    "pytest-httpx>=0.35.0",
+    "pytest-mock>=3.14.0",
+    "pytest-sugar>=1.0.0",
+    "pytest-xdist>=3.6.1",
+    "ruff>=0.12.1",
+]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+docstring-code-format = true
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.pytest.ini_options]
+addopts = ["-p", "no:debugging"]

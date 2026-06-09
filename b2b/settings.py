@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = Field(default=3600, alias='ACCESS_TOKEN_TTL_SECONDS')
     refresh_token_ttl_seconds: int = Field(default=2_592_000, alias='REFRESH_TOKEN_TTL_SECONDS')
 
+    # Service-to-service ключи. b2c_to_b2b_key используется в /inventory/* endpoints.
+    b2c_to_b2b_key: str = Field(default='dev-b2c-to-b2b-key-change-me', alias='B2C_TO_B2B_KEY')
+    # mod_to_b2b_key используется в /moderation/events endpoint (US-B2B-09).
+    mod_to_b2b_key: str = Field(default='dev-mod-to-b2b-key-change-me', alias='MOD_TO_B2B_KEY')
+
     @property
     def sync_database_url(self) -> str:
         return self.database_url.replace('+asyncpg', '+psycopg2')

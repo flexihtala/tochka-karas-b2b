@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from apps.products.enums import ProductStatus
 from schemas import CreateUUIDSchema, ReadUUIDSchema, UpdateUUIDSchema
@@ -18,7 +19,9 @@ class ProductCreateSchema(CreateUUIDSchema):
     status: ProductStatus = ProductStatus.CREATED
     deleted: bool = False
     blocking_reason_id: UUID | None = None
+    blocking_reason_title: str | None = None
     moderator_comment: str | None = None
+    field_reports: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProductReadSchema(ReadUUIDSchema):
@@ -32,7 +35,9 @@ class ProductReadSchema(ReadUUIDSchema):
     status: ProductStatus
     deleted: bool
     blocking_reason_id: UUID | None
+    blocking_reason_title: str | None = None
     moderator_comment: str | None
+    field_reports: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -48,7 +53,9 @@ class ProductUpdateSchema(UpdateUUIDSchema):
     status: ProductStatus | None = None
     deleted: bool | None = None
     blocking_reason_id: UUID | None = None
+    blocking_reason_title: str | None = None
     moderator_comment: str | None = None
+    field_reports: list[dict[str, Any]] | None = None
 
 
 class ProductImageCreateSchema(CreateUUIDSchema):

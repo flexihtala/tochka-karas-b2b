@@ -1,3 +1,4 @@
+from .request import CatalogFilterSchema
 from .response import (
     CatalogFacetSchema,
     CatalogFacetsResponseSchema,
@@ -14,6 +15,7 @@ __all__ = [
     'CatalogFacetSchema',
     'CatalogFacetValueSchema',
     'CatalogFacetsResponseSchema',
+    'CatalogFilterSchema',
     'CatalogPaginatedResponseSchema',
     'CatalogProductCardSchema',
     'CatalogProductDetailCharacteristicSchema',
