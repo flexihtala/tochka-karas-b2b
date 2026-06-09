@@ -92,6 +92,19 @@ async def test_breadcrumbs_for_unknown_category_returns_404():
 
 
 @pytest.mark.anyio
+async def test_unknown_category_returns_404():
+    """DoD-сценарий (category-nav): breadcrumbs по несуществующей категории → 404."""
+    repo = FakeCategoryRepository()
+    _seed_three_level_tree(repo)
+
+    use_case = GetBreadcrumbsUseCase(category_repository=repo)
+
+    with pytest.raises(CategoryNotFoundError) as exc_info:
+        await use_case(category_id=uuid4(), product_id=None)
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_orphan_node_returns_422():
     """DoD test: цепочка предков обрывается на parent_id, на который никто не ссылается."""
     repo = FakeCategoryRepository()

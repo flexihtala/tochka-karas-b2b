@@ -1,8 +1,8 @@
 """create categories table (adjacency-list)
 
-Revision ID: 20260520_0002
-Revises: 20260520_0001
-Create Date: 2026-05-20
+Revision ID: 20260609_0007
+Revises: 20260605_0006
+Create Date: 2026-06-09
 """
 
 from typing import Sequence
@@ -10,8 +10,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = '20260520_0002'
-down_revision: str | None = '20260520_0001'
+revision: str = '20260609_0007'
+down_revision: str | None = '20260605_0006'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
