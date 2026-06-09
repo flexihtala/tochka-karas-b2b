@@ -18,10 +18,9 @@ class ListSellerProductsUseCase:
     - По умолчанию возвращаются только не удалённые товары (`deleted=false`).
       `include_deleted=true` снимает фильтр.
     - Поиск по title — ILIKE без учёта регистра.
-    - Агрегаты `skus_count` и `total_active_quantity` — заглушка `0` до US-B2B-02
-      (модель SKU отсутствует в main). ADR в PR: после появления SKU считать
-      `Count` / `Sum(active_quantity)` через correlated subquery в одном `SELECT`
-      (без N+1) — добавим в US-B2B-02.
+    - Агрегаты `skus_count` (число SKU) и `total_active_quantity` (сумма
+      active_quantity по SKU товара) считаются в репозитории коррелированными
+      подзапросами в одном `SELECT` со страницей товаров (без N+1) — см. ADR.
     """
 
     def __init__(
@@ -42,7 +41,7 @@ class ListSellerProductsUseCase:
         include_deleted: bool = False,
         search: str | None = None,
     ) -> ProductPaginatedResponseSchema:
-        products, total_count = await self.product_repository.list_for_seller(
+        rows, total_count = await self.product_repository.list_for_seller(
             seller_id=current_user.id,
             limit=limit,
             offset=offset,
@@ -52,7 +51,8 @@ class ListSellerProductsUseCase:
         )
 
         items: list[ProductListItemResponseSchema] = []
-        for product in products:
+        for row in rows:
+            product = row.product
             images = await self.image_repository.list_by_product(product.id)
             items.append(
                 ProductListItemResponseSchema(
@@ -67,8 +67,8 @@ class ListSellerProductsUseCase:
                         ProductImageResponseSchema(id=image.id, url=image.url, ordering=image.ordering)
                         for image in images
                     ],
-                    skus_count=0,
-                    total_active_quantity=0,
+                    skus_count=row.skus_count,
+                    total_active_quantity=row.total_active_quantity,
                     created_at=product.created_at,
                     updated_at=product.updated_at,
                 )

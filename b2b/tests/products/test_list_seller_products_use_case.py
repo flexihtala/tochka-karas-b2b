@@ -128,8 +128,8 @@ async def test_search_by_title_case_insensitive():
 
 
 @pytest.mark.anyio
-async def test_pagination_metadata_and_skus_aggregates_are_stubbed_to_zero():
-    """ADR: до US-B2B-02 (SKU) агрегаты возвращаются как 0."""
+async def test_pagination_metadata_is_correct():
+    """limit/offset/total_count отражают полную выборку; страница нужного размера."""
     products = FakeProductRepository()
     seller = make_user()
     now = datetime.now(UTC)
@@ -143,6 +143,26 @@ async def test_pagination_metadata_and_skus_aggregates_are_stubbed_to_zero():
     assert page.offset == 1
     assert page.total_count == 5
     assert len(page.items) == 2
-    for item in page.items:
-        assert item.skus_count == 0
-        assert item.total_active_quantity == 0
+
+
+@pytest.mark.anyio
+async def test_list_includes_sku_aggregates():
+    """DoD «Прочее»: ответ включает реальные skus_count и total_active_quantity по каждому товару.
+
+    Агрегаты считает репозиторий (Count / Sum(active_quantity) подзапросами); use case их
+    просто прокидывает. Фейк репозитория возвращает заранее заданные значения, имитируя
+    результат подзапросов.
+    """
+    products = FakeProductRepository()
+    seller = make_user()
+    products.add(seller_id=seller.id, title='С тремя SKU', skus_count=3, total_active_quantity=42)
+    products.add(seller_id=seller.id, title='Без SKU', skus_count=0, total_active_quantity=0)
+
+    use_case = make_use_case(products)
+    response = await use_case(current_user=seller, limit=20, offset=0)
+
+    by_title = {item.title: item for item in response.items}
+    assert by_title['С тремя SKU'].skus_count == 3
+    assert by_title['С тремя SKU'].total_active_quantity == 42
+    assert by_title['Без SKU'].skus_count == 0
+    assert by_title['Без SKU'].total_active_quantity == 0

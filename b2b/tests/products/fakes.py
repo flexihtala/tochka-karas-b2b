@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from apps.categories.schemas import CategoryCreateSchema, CategoryReadSchema, CategoryUpdateSchema
 from apps.products.enums import ProductStatus
+from apps.products.repositories import SellerProductRow
 from apps.products.schemas.db import (
     CharacteristicValueCreateSchema,
     CharacteristicValueReadSchema,
@@ -66,6 +67,9 @@ class FakeProductRepository:
         self.by_id: dict[UUID, ProductReadSchema] = {}
         self.created: list[ProductCreateSchema] = []
         self.updated: list[ProductUpdateSchema] = []
+        # product_id -> (skus_count, total_active_quantity); агрегаты по SKU,
+        # которые реальный репозиторий считает подзапросами в list_for_seller.
+        self.aggregates: dict[UUID, tuple[int, int]] = {}
 
     def add(
         self,
@@ -83,10 +87,13 @@ class FakeProductRepository:
         moderator_comment: str | None = None,
         field_reports: list[dict[str, Any]] | None = None,
         created_at: datetime | None = None,
+        skus_count: int = 0,
+        total_active_quantity: int = 0,
     ) -> ProductReadSchema:
         """Посадить уже существующий продукт (используется в get/edit/delete/list-тестах)."""
         product_id = id or uuid4()
         now = created_at or datetime.now(UTC)
+        self.aggregates[product_id] = (skus_count, total_active_quantity)
         product = ProductReadSchema(
             id=product_id,
             seller_id=seller_id or uuid4(),
@@ -141,7 +148,7 @@ class FakeProductRepository:
         status: ProductStatus | None = None,
         include_deleted: bool = False,
         search: str | None = None,
-    ) -> tuple[list[ProductReadSchema], int]:
+    ) -> tuple[list[SellerProductRow], int]:
         rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
         if not include_deleted:
             rows = [p for p in rows if not p.deleted]
@@ -152,7 +159,16 @@ class FakeProductRepository:
             rows = [p for p in rows if needle in p.title.lower()]
         rows.sort(key=lambda p: p.created_at, reverse=True)
         total_count = len(rows)
-        return rows[offset : offset + limit], total_count
+        page = rows[offset : offset + limit]
+        result = [
+            SellerProductRow(
+                product=p,
+                skus_count=self.aggregates.get(p.id, (0, 0))[0],
+                total_active_quantity=self.aggregates.get(p.id, (0, 0))[1],
+            )
+            for p in page
+        ]
+        return result, total_count
 
     async def update(self, data: ProductUpdateSchema) -> ProductReadSchema | None:
         self.updated.append(data)
