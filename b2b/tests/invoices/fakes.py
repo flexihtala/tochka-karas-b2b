@@ -81,6 +81,7 @@ class FakeSKURepositoryReadable:
         article: str | None = None,
         active_quantity: int = 0,
         reserved_quantity: int = 0,
+        stock_quantity: int | None = None,
     ) -> UUID:
         sku_id = id or uuid4()
         now = datetime.now(UTC)
@@ -94,6 +95,8 @@ class FakeSKURepositoryReadable:
             article=article,
             active_quantity=active_quantity,
             reserved_quantity=reserved_quantity,
+            # Канонический инвариант: stock = active + reserved (US-B2B-08).
+            stock_quantity=stock_quantity if stock_quantity is not None else active_quantity + reserved_quantity,
             created_at=now,
             updated_at=now,
         )
