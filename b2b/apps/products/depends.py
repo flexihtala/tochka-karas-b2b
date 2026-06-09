@@ -11,6 +11,7 @@ from apps.products.use_cases import (
     DeleteProductUseCase,
     EditProductUseCase,
     GetProductUseCase,
+    ListSellerProductsUseCase,
 )
 
 
@@ -24,3 +25,4 @@ class ProductsProvider(Provider):
     delete_product_use_case = provide(DeleteProductUseCase, scope=Scope.REQUEST)
     edit_product_use_case = provide(EditProductUseCase, scope=Scope.REQUEST)
     get_product_use_case = provide(GetProductUseCase, scope=Scope.REQUEST)
+    list_seller_products_use_case = provide(ListSellerProductsUseCase, scope=Scope.REQUEST)

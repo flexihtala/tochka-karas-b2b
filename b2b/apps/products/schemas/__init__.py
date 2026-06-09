@@ -53,6 +53,12 @@ from .response import (
     ProductImageResponseSchema as ProductImageResponseSchema,
 )
 from .response import (
+    ProductListItemResponseSchema as ProductListItemResponseSchema,
+)
+from .response import (
+    ProductPaginatedResponseSchema as ProductPaginatedResponseSchema,
+)
+from .response import (
     ProductResponseSchema as ProductResponseSchema,
 )
 from .response import (

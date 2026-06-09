@@ -90,3 +90,44 @@ class ProductDetailResponseSchema(BaseModel):
     blocked: bool
     blocking_reason: BlockingReasonSchema | None = None
     field_reports: list[FieldReportSchema] = Field(default_factory=list)
+
+
+class ProductListItemResponseSchema(BaseModel):
+    """Краткое представление товара в списке seller cabinet (B2B-11).
+
+    Соответствует ProductShortResponse в neomarket-protocols/b2b/openapi.yaml:
+    required [id, title, slug, status, category_id, deleted, created_at];
+    optional min_price (nullable), cover_image (nullable).
+
+    Расширения (не входят в spec, дополнительные данные для UI кабинета продавца):
+    - seller_id, images[], skus_count, total_active_quantity, updated_at.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    # Поля по спецификации
+    id: UUID
+    title: str
+    slug: str
+    status: ProductStatus
+    category_id: UUID
+    deleted: bool
+    created_at: datetime
+    min_price: int | None = Field(default=None, description='Минимальная цена SKU в копейках')
+    cover_image: str | None = Field(default=None)
+
+    # Расширения для seller UI
+    seller_id: UUID
+    images: list[ProductImageResponseSchema] = Field(default_factory=list)
+    skus_count: int = 0
+    total_active_quantity: int = 0
+    updated_at: datetime
+
+
+class ProductPaginatedResponseSchema(BaseModel):
+    """ProductPaginatedResponse из protocols: {items, total_count, limit, offset}."""
+
+    items: list[ProductListItemResponseSchema] = Field(default_factory=list)
+    total_count: int
+    limit: int
+    offset: int

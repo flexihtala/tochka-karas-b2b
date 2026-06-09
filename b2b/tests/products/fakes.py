@@ -82,10 +82,11 @@ class FakeProductRepository:
         blocking_reason_title: str | None = None,
         moderator_comment: str | None = None,
         field_reports: list[dict[str, Any]] | None = None,
+        created_at: datetime | None = None,
     ) -> ProductReadSchema:
-        """Посадить уже существующий продукт (используется в get/edit/delete-тестах)."""
+        """Посадить уже существующий продукт (используется в get/edit/delete/list-тестах)."""
         product_id = id or uuid4()
-        now = datetime.now(UTC)
+        now = created_at or datetime.now(UTC)
         product = ProductReadSchema(
             id=product_id,
             seller_id=seller_id or uuid4(),
@@ -130,6 +131,28 @@ class FakeProductRepository:
 
     async def get_or_none(self, id_: UUID) -> ProductReadSchema | None:
         return self.by_id.get(id_)
+
+    async def list_for_seller(
+        self,
+        *,
+        seller_id: UUID,
+        limit: int,
+        offset: int,
+        status: ProductStatus | None = None,
+        include_deleted: bool = False,
+        search: str | None = None,
+    ) -> tuple[list[ProductReadSchema], int]:
+        rows = [p for p in self.by_id.values() if p.seller_id == seller_id]
+        if not include_deleted:
+            rows = [p for p in rows if not p.deleted]
+        if status is not None:
+            rows = [p for p in rows if p.status == status]
+        if search:
+            needle = search.lower()
+            rows = [p for p in rows if needle in p.title.lower()]
+        rows.sort(key=lambda p: p.created_at, reverse=True)
+        total_count = len(rows)
+        return rows[offset : offset + limit], total_count
 
     async def update(self, data: ProductUpdateSchema) -> ProductReadSchema | None:
         self.updated.append(data)
