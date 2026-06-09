@@ -311,13 +311,20 @@ class FakeCharacteristicValueRepository:
 
 
 class FakeSKURepositoryForProducts:
-    """Минимальный фейк SKURepository для edit-product-тестов (нужен count_by_product)."""
+    """Минимальный фейк SKURepository для edit-product-тестов.
+
+    Поддерживает count_by_product (через override) и list_full_by_product
+    (по умолчанию пусто — у товаров в этих тестах SKU не заведены).
+    """
 
     def __init__(self):
         self.count_by_product_overrides: dict[UUID, int] = {}
 
     async def count_by_product(self, product_id: UUID) -> int:
         return self.count_by_product_overrides.get(product_id, 0)
+
+    async def list_full_by_product(self, product_id: UUID) -> list[SKUReadSchema]:
+        return []
 
 
 class FakeSKURepositoryForGet:
@@ -363,6 +370,9 @@ class FakeSKURepositoryForGet:
             [sku for sku in self.by_id.values() if sku.product_id == product_id],
             key=lambda s: (s.created_at, str(s.id)),
         )
+
+    async def count_by_product(self, product_id: UUID) -> int:
+        return len([sku for sku in self.by_id.values() if sku.product_id == product_id])
 
 
 class FakeSKUImageRepository:

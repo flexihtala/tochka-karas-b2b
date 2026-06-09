@@ -42,6 +42,8 @@ from tests.products.fakes import (
     FakeOutboxRepository,
     FakeProductImageRepository,
     FakeProductRepository,
+    FakeSKUCharacteristicValueRepository,
+    FakeSKUImageRepository,
     FakeSKURepositoryForDelete,
     FakeSKURepositoryForProducts,
 )
@@ -237,6 +239,8 @@ async def test_hard_blocked_product_rejects_seller_edits():
         characteristic_repository=FakeCharacteristicValueRepository(),  # type: ignore[arg-type]
         category_repository=FakeCategoryRepository(),  # type: ignore[arg-type]
         sku_repository=FakeSKURepositoryForProducts(),  # type: ignore[arg-type]
+        sku_image_repository=FakeSKUImageRepository(),  # type: ignore[arg-type]
+        sku_characteristic_repository=FakeSKUCharacteristicValueRepository(),  # type: ignore[arg-type]
         outbox_repository=FakeOutboxRepository(),  # type: ignore[arg-type]
     )
 

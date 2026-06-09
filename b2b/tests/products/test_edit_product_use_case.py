@@ -40,6 +40,9 @@ from tests.products.fakes import (
     FakeOutboxRepository,
     FakeProductImageRepository,
     FakeProductRepository,
+    FakeSKUCharacteristicValueRepository,
+    FakeSKUImageRepository,
+    FakeSKURepositoryForGet,
     FakeSKURepositoryForProducts,
 )
 
@@ -73,7 +76,9 @@ def make_use_case(
     images: FakeProductImageRepository | None = None,
     characteristics: FakeCharacteristicValueRepository | None = None,
     categories: FakeCategoryRepository | None = None,
-    skus: FakeSKURepositoryForProducts | None = None,
+    skus=None,
+    sku_images: FakeSKUImageRepository | None = None,
+    sku_characteristics: FakeSKUCharacteristicValueRepository | None = None,
     outbox: FakeOutboxRepository | None = None,
 ) -> EditProductUseCase:
     return EditProductUseCase(
@@ -82,6 +87,8 @@ def make_use_case(
         characteristic_repository=characteristics or FakeCharacteristicValueRepository(),
         category_repository=categories or FakeCategoryRepository(),
         sku_repository=skus or FakeSKURepositoryForProducts(),
+        sku_image_repository=sku_images or FakeSKUImageRepository(),
+        sku_characteristic_repository=sku_characteristics or FakeSKUCharacteristicValueRepository(),
         outbox_repository=outbox or FakeOutboxRepository(),
     )
 
@@ -362,3 +369,58 @@ async def test_edit_outbox_event_payload_contains_full_product_snapshot():
     assert len(payload['images']) == 1
     assert payload['images'][0]['url'] == '/new.jpg'
     assert payload['sku_count'] == 2
+
+
+@pytest.mark.anyio
+async def test_edit_response_includes_full_skus():
+    """Ответ редактирования содержит полный список SKU товара (ProductResponse.skus),
+    а не пустую заглушку — клиент после правки видит варианты с картинками и характеристиками.
+    """
+    products = FakeProductRepository()
+    skus = FakeSKURepositoryForGet()
+    sku_images = FakeSKUImageRepository()
+    sku_characteristics = FakeSKUCharacteristicValueRepository()
+    user = make_user()
+    product = products.add(seller_id=user.id, status=ProductStatus.MODERATED)
+    sku_a = skus.add(
+        product_id=product.id,
+        name='256GB Black',
+        price=12_999_000,
+        active_quantity=10,
+        reserved_quantity=2,
+    )
+    sku_b = skus.add(
+        product_id=product.id,
+        name='512GB White',
+        price=14_999_000,
+        active_quantity=5,
+        reserved_quantity=0,
+    )
+    sku_images.add(sku_id=sku_a.id, url='/s3/256-black.jpg', ordering=0)
+    sku_characteristics.add(sku_id=sku_a.id, name='Цвет', value='Чёрный')
+
+    use_case = make_use_case(
+        products=products,
+        skus=skus,
+        sku_images=sku_images,
+        sku_characteristics=sku_characteristics,
+    )
+
+    response = await use_case(product.id, make_request(title='Updated'), user)
+
+    # skus заполнен реальными вариантами товара (не пустой заглушкой).
+    assert len(response.skus) == 2
+    by_id = {s.id: s for s in response.skus}
+
+    a = by_id[sku_a.id]
+    assert a.name == '256GB Black'
+    assert a.active_quantity == 10
+    assert a.reserved_quantity == 2
+    assert a.stock_quantity == 12  # derived: active + reserved
+    assert [img.url for img in a.images] == ['/s3/256-black.jpg']
+    assert [(c.name, c.value) for c in a.characteristics] == [('Цвет', 'Чёрный')]
+
+    b = by_id[sku_b.id]
+    assert b.name == '512GB White'
+    assert b.images == []
+    assert b.characteristics == []
