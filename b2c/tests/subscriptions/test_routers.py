@@ -107,25 +107,8 @@ def stubs():
     return (StubSubscribe(), StubUnsubscribe())
 
 
-def test_subscribe_returns_204_with_default_events(stubs):
-    subscribe_stub, unsubscribe_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    product_id = uuid4()
-    client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
-
-    # Empty body → default events per spec
-    response = client.post(f'/api/v1/favorites/{product_id}/subscribe')
-
-    assert response.status_code == 204
-    assert response.text == ''
-    # use_case вызван с product_id из path и дефолтным набором событий
-    data, current_user = subscribe_stub.calls[0]
-    assert data.product_id == product_id
-    assert set(data.notify_on) == {'BACK_IN_STOCK', 'PRICE_DROP'}
-    assert current_user.id == user.id
-
-
-def test_subscribe_returns_204_with_explicit_events(stubs):
+def test_subscribe_returns_201_with_notify_on(stubs):
+    """Канон/DoD: создание подписки → 201, в теле — notify_on."""
     subscribe_stub, unsubscribe_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     product_id = uuid4()
@@ -133,12 +116,30 @@ def test_subscribe_returns_204_with_explicit_events(stubs):
 
     response = client.post(
         f'/api/v1/favorites/{product_id}/subscribe',
-        json={'events': ['PRICE_DROP']},
+        json={'notify_on': ['PRICE_DROP']},
     )
 
-    assert response.status_code == 204
+    assert response.status_code == 201
+    assert response.json()['notify_on'] == ['PRICE_DROP']
+    # use_case вызван с product_id из path, notify_on из тела и user_id из JWT
     data, current_user = subscribe_stub.calls[0]
+    assert data.product_id == product_id
     assert data.notify_on == ['PRICE_DROP']
+    assert current_user.id == user.id
+
+
+def test_subscribe_defaults_notify_on_when_body_omitted(stubs):
+    """Тело не передано → подписка на оба события по умолчанию, 201."""
+    subscribe_stub, unsubscribe_stub = stubs
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    product_id = uuid4()
+    client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
+
+    response = client.post(f'/api/v1/favorites/{product_id}/subscribe')
+
+    assert response.status_code == 201
+    data, current_user = subscribe_stub.calls[0]
+    assert set(data.notify_on) == {'BACK_IN_STOCK', 'PRICE_DROP'}
     assert current_user.id == user.id
 
 
@@ -157,18 +158,34 @@ def test_duplicate_subscription_returns_409(stubs):
     }
 
 
-def test_invalid_events_returns_400(stubs):
+def test_invalid_notify_on_returns_400(stubs):
+    """DoD: невалидное значение notify_on → 400, use-case не вызывается."""
     subscribe_stub, unsubscribe_stub = stubs
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
     client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
 
     response = client.post(
         f'/api/v1/favorites/{uuid4()}/subscribe',
-        json={'events': ['NOT_A_REAL_EVENT']},
+        json={'notify_on': ['NOT_A_REAL_EVENT']},
     )
 
     assert response.status_code == 400
     assert response.json() == {'code': 'INVALID_REQUEST', 'message': 'Невалидное тело запроса'}
+    assert subscribe_stub.calls == []
+
+
+def test_empty_notify_on_returns_400(stubs):
+    """DoD: пустой notify_on → 400."""
+    subscribe_stub, unsubscribe_stub = stubs
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    client = TestClient(_make_app(subscribe_stub, unsubscribe_stub, user=user))
+
+    response = client.post(
+        f'/api/v1/favorites/{uuid4()}/subscribe',
+        json={'notify_on': []},
+    )
+
+    assert response.status_code == 400
     assert subscribe_stub.calls == []
 
 
