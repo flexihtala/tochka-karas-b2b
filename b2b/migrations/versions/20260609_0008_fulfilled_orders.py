@@ -1,8 +1,8 @@
 """create fulfilled_orders table (inventory fulfill idempotency)
 
-Revision ID: 20260520_0005
-Revises: 20260520_0004
-Create Date: 2026-05-20
+Revision ID: 20260609_0008
+Revises: 20260609_0007
+Create Date: 2026-06-09
 
 Создаёт таблицу fulfilled_orders — журнал списаний резерва при доставке
 (POST /api/v1/inventory/fulfill, US-B2B-10). Идемпотентность по `order_id`:
@@ -15,8 +15,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = '20260520_0005'
-down_revision: str | None = '20260520_0004'
+revision: str = '20260609_0008'
+down_revision: str | None = '20260609_0007'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

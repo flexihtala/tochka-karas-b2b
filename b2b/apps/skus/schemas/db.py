@@ -12,7 +12,7 @@ class SKUCreateSchema(CreateUUIDSchema):
     product_id: UUID
     name: str
     price: int
-    cost_price: int
+    cost_price: int | None = None
     discount: int = 0
     article: str | None = None
     active_quantity: int = 0
@@ -25,11 +25,12 @@ class SKUReadSchema(ReadUUIDSchema):
     product_id: UUID
     name: str
     price: int
-    cost_price: int
+    cost_price: int | None
     discount: int
     article: str | None
     active_quantity: int
     reserved_quantity: int
+    stock_quantity: int
     created_at: datetime
     updated_at: datetime
 

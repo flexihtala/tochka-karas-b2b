@@ -1,8 +1,11 @@
 """create processed_events table (inbox idempotency)
 
-Revision ID: 20260520_0004
-Revises: 20260520_0003
+Revision ID: 20260605_0006
+Revises: 20260602_0005
 Create Date: 2026-05-20
+
+Re-chained after main's head (0005_product_field_reports) when US-B2B-08 merged,
+to keep a single linear alembic history.
 
 Создаёт таблицу processed_events: at-most-once семантика для входящих
 service-to-service запросов с idempotency_key (включая POST /inventory/reserve,
@@ -16,8 +19,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = '20260520_0004'
-down_revision: str | None = '20260520_0003'
+revision: str = '20260605_0006'
+down_revision: str | None = '20260602_0005'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

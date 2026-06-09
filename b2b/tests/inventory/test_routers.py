@@ -322,6 +322,16 @@ def test_fulfill_without_service_key_returns_401(client: TestClient, stubs):
     assert fulfill_stub.calls == []
 
 
+def test_missing_service_key_returns_401(client: TestClient, stubs):
+    """DoD-сценарий (fulfill-delivery): запрос /fulfill без X-Service-Key → 401, без списания."""
+    _, _, fulfill_stub = stubs
+    response = client.post('/api/v1/inventory/fulfill', json=_fulfill_payload())
+
+    assert response.status_code == 401
+    assert response.json()['code'] == 'INVALID_SERVICE_KEY'
+    assert fulfill_stub.calls == []
+
+
 def test_fulfill_with_wrong_service_key_returns_401(client: TestClient, stubs):
     _, _, fulfill_stub = stubs
     response = client.post(

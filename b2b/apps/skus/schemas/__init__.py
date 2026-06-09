@@ -32,6 +32,9 @@ from .request import (
     SKUCreateRequestSchema as SKUCreateRequestSchema,
 )
 from .request import (
+    SKUEditRequestSchema as SKUEditRequestSchema,
+)
+from .request import (
     SKUImageCreateRequestSchema as SKUImageCreateRequestSchema,
 )
 from .response import (
