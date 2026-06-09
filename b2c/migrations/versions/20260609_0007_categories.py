@@ -1,0 +1,41 @@
+"""create categories table (adjacency-list)
+
+Revision ID: 20260609_0007
+Revises: 20260605_0006
+Create Date: 2026-06-09
+"""
+
+from typing import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = '20260609_0007'
+down_revision: str | None = '20260605_0006'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        'categories',
+        sa.Column('name', sa.String(length=255), nullable=False),
+        sa.Column('slug', sa.String(length=255), nullable=False),
+        sa.Column('parent_id', sa.Uuid(), nullable=True),
+        sa.Column('ordering', sa.Integer(), server_default='0', nullable=False),
+        sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['parent_id'], ['categories.id'], ondelete='SET NULL'),
+        sa.PrimaryKeyConstraint('id'),
+    )
+    op.create_index(op.f('ix_categories_id'), 'categories', ['id'], unique=False)
+    op.create_index(op.f('ix_categories_parent_id'), 'categories', ['parent_id'], unique=False)
+    op.create_index(op.f('ix_categories_slug'), 'categories', ['slug'], unique=True)
+
+
+def downgrade() -> None:
+    op.drop_index(op.f('ix_categories_slug'), table_name='categories')
+    op.drop_index(op.f('ix_categories_parent_id'), table_name='categories')
+    op.drop_index(op.f('ix_categories_id'), table_name='categories')
+    op.drop_table('categories')
