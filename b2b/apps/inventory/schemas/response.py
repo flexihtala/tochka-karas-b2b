@@ -41,3 +41,19 @@ class UnreserveResponseSchema(BaseModel):
     order_id: UUID
     status: str = 'UNRESERVED'
     processed_at: datetime
+
+
+class FulfillResponseSchema(BaseModel):
+    """Ответ POST /inventory/fulfill (US-B2B-10).
+
+    Соответствует InventoryOrderResponse в neomarket-protocols/b2b/openapi.yaml:
+    required [order_id, status, processed_at], status='FULFILLED'.
+
+    Повтор по тому же `order_id` — возвращаем кэшированный response.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    order_id: UUID
+    status: str = 'FULFILLED'
+    processed_at: datetime

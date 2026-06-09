@@ -1,4 +1,4 @@
-"""Router-level тесты для /api/v1/inventory/{reserve,unreserve}.
+"""Router-level тесты для /api/v1/inventory/{reserve,unreserve,fulfill}.
 
 Используем stub use-case в DI-контейнере (как в tests/skus/test_routers.py).
 """
@@ -17,12 +17,18 @@ from apps.inventory.routers import router as inventory_router
 from datetime import UTC, datetime
 
 from apps.inventory.schemas import (
+    FulfillRequestSchema,
+    FulfillResponseSchema,
     ReserveRequestSchema,
     ReserveResponseSchema,
     UnreserveRequestSchema,
     UnreserveResponseSchema,
 )
-from apps.inventory.use_cases import ReserveInventoryUseCase, UnreserveInventoryUseCase
+from apps.inventory.use_cases import (
+    FulfillInventoryUseCase,
+    ReserveInventoryUseCase,
+    UnreserveInventoryUseCase,
+)
 from settings import settings
 
 
@@ -57,11 +63,33 @@ class StubUnreserveUseCase:
         return self.response
 
 
+class StubFulfillUseCase:
+    def __init__(self):
+        from datetime import UTC, datetime
+
+        self.calls: list[FulfillRequestSchema] = []
+        self.response = FulfillResponseSchema(
+            order_id=uuid4(),
+            status='FULFILLED',
+            processed_at=datetime.now(UTC),
+        )
+
+    async def __call__(self, data: FulfillRequestSchema) -> FulfillResponseSchema:
+        self.calls.append(data)
+        return self.response
+
+
 class InventoryRouteProvider(Provider):
-    def __init__(self, reserve_stub: StubReserveUseCase, unreserve_stub: StubUnreserveUseCase):
+    def __init__(
+        self,
+        reserve_stub: StubReserveUseCase,
+        unreserve_stub: StubUnreserveUseCase,
+        fulfill_stub: StubFulfillUseCase,
+    ):
         super().__init__()
         self.reserve_stub = reserve_stub
         self.unreserve_stub = unreserve_stub
+        self.fulfill_stub = fulfill_stub
 
     @provide(scope=Scope.REQUEST)
     def get_reserve_use_case(self) -> ReserveInventoryUseCase:
@@ -71,12 +99,23 @@ class InventoryRouteProvider(Provider):
     def get_unreserve_use_case(self) -> UnreserveInventoryUseCase:
         return self.unreserve_stub  # type: ignore[return-value]
 
+    @provide(scope=Scope.REQUEST)
+    def get_fulfill_use_case(self) -> FulfillInventoryUseCase:
+        return self.fulfill_stub  # type: ignore[return-value]
 
-def _make_app(reserve_stub: StubReserveUseCase, unreserve_stub: StubUnreserveUseCase) -> FastAPI:
+
+def _make_app(
+    reserve_stub: StubReserveUseCase,
+    unreserve_stub: StubUnreserveUseCase,
+    fulfill_stub: StubFulfillUseCase,
+) -> FastAPI:
     app = FastAPI()
     app.include_router(inventory_router, prefix='/api/v1')
     setup_error_handlers(app)
-    container = make_async_container(FastapiProvider(), InventoryRouteProvider(reserve_stub, unreserve_stub))
+    container = make_async_container(
+        FastapiProvider(),
+        InventoryRouteProvider(reserve_stub, unreserve_stub, fulfill_stub),
+    )
     setup_dishka(container, app)
     return app
 
@@ -107,15 +146,24 @@ def _unreserve_payload(
     }
 
 
-@pytest.fixture
-def stubs() -> tuple[StubReserveUseCase, StubUnreserveUseCase]:
-    return StubReserveUseCase(), StubUnreserveUseCase()
+def _fulfill_payload(sku_id: UUID | None = None, order_id: UUID | None = None) -> dict:
+    return {
+        'order_id': str(order_id or uuid4()),
+        'items': [
+            {'sku_id': str(sku_id or uuid4()), 'quantity': 2},
+        ],
+    }
 
 
 @pytest.fixture
-def client(stubs: tuple[StubReserveUseCase, StubUnreserveUseCase]) -> TestClient:
-    reserve, unreserve = stubs
-    return TestClient(_make_app(reserve, unreserve))
+def stubs() -> tuple[StubReserveUseCase, StubUnreserveUseCase, StubFulfillUseCase]:
+    return StubReserveUseCase(), StubUnreserveUseCase(), StubFulfillUseCase()
+
+
+@pytest.fixture
+def client(stubs: tuple[StubReserveUseCase, StubUnreserveUseCase, StubFulfillUseCase]) -> TestClient:
+    reserve, unreserve, fulfill = stubs
+    return TestClient(_make_app(reserve, unreserve, fulfill))
 
 
 @pytest.fixture
@@ -127,7 +175,7 @@ def service_key_headers() -> dict:
 
 
 def test_reserve_returns_200(client: TestClient, stubs, service_key_headers):
-    reserve_stub, _ = stubs
+    reserve_stub, _, _ = stubs
     payload = _reserve_payload()
     response = client.post('/api/v1/inventory/reserve', json=payload, headers=service_key_headers)
 
@@ -140,7 +188,7 @@ def test_reserve_returns_200(client: TestClient, stubs, service_key_headers):
 
 
 def test_reserve_without_service_key_returns_401(client: TestClient, stubs):
-    reserve_stub, _ = stubs
+    reserve_stub, _, _ = stubs
     response = client.post('/api/v1/inventory/reserve', json=_reserve_payload())
 
     assert response.status_code == 401
@@ -149,7 +197,7 @@ def test_reserve_without_service_key_returns_401(client: TestClient, stubs):
 
 
 def test_reserve_with_wrong_service_key_returns_401(client: TestClient, stubs):
-    reserve_stub, _ = stubs
+    reserve_stub, _, _ = stubs
     response = client.post(
         '/api/v1/inventory/reserve',
         json=_reserve_payload(),
@@ -189,7 +237,7 @@ def test_reserve_conflict_returns_409_with_failed_items(
     stubs,
     service_key_headers,
 ):
-    reserve_stub, _ = stubs
+    reserve_stub, _, _ = stubs
     failed_items = [
         {
             'sku_id': str(uuid4()),
@@ -216,7 +264,7 @@ def test_reserve_conflict_returns_409_with_failed_items(
 
 
 def test_unreserve_returns_200(client: TestClient, stubs, service_key_headers):
-    _, unreserve_stub = stubs
+    _, unreserve_stub, _ = stubs
     response = client.post(
         '/api/v1/inventory/unreserve',
         json=_unreserve_payload(),
@@ -232,7 +280,7 @@ def test_unreserve_returns_200(client: TestClient, stubs, service_key_headers):
 
 
 def test_unreserve_without_service_key_returns_401(client: TestClient, stubs):
-    _, unreserve_stub = stubs
+    _, unreserve_stub, _ = stubs
     response = client.post('/api/v1/inventory/unreserve', json=_unreserve_payload())
 
     assert response.status_code == 401
@@ -242,5 +290,86 @@ def test_unreserve_without_service_key_returns_401(client: TestClient, stubs):
 
 def test_unreserve_validation_error_returns_400(client: TestClient, service_key_headers):
     response = client.post('/api/v1/inventory/unreserve', json={}, headers=service_key_headers)
+
+    assert response.status_code == 400
+
+
+# ─────── /inventory/fulfill ───────
+
+
+def test_fulfill_returns_200(client: TestClient, stubs, service_key_headers):
+    _, _, fulfill_stub = stubs
+    response = client.post(
+        '/api/v1/inventory/fulfill',
+        json=_fulfill_payload(),
+        headers=service_key_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['status'] == 'FULFILLED'
+    assert 'order_id' in body
+    assert 'processed_at' in body
+    assert len(fulfill_stub.calls) == 1
+
+
+def test_fulfill_without_service_key_returns_401(client: TestClient, stubs):
+    _, _, fulfill_stub = stubs
+    response = client.post('/api/v1/inventory/fulfill', json=_fulfill_payload())
+
+    assert response.status_code == 401
+    assert response.json()['code'] == 'INVALID_SERVICE_KEY'
+    assert fulfill_stub.calls == []
+
+
+def test_missing_service_key_returns_401(client: TestClient, stubs):
+    """DoD-сценарий (fulfill-delivery): запрос /fulfill без X-Service-Key → 401, без списания."""
+    _, _, fulfill_stub = stubs
+    response = client.post('/api/v1/inventory/fulfill', json=_fulfill_payload())
+
+    assert response.status_code == 401
+    assert response.json()['code'] == 'INVALID_SERVICE_KEY'
+    assert fulfill_stub.calls == []
+
+
+def test_fulfill_with_wrong_service_key_returns_401(client: TestClient, stubs):
+    _, _, fulfill_stub = stubs
+    response = client.post(
+        '/api/v1/inventory/fulfill',
+        json=_fulfill_payload(),
+        headers={'X-Service-Key': 'wrong-key'},
+    )
+
+    assert response.status_code == 401
+    assert response.json()['code'] == 'INVALID_SERVICE_KEY'
+    assert fulfill_stub.calls == []
+
+
+def test_fulfill_validation_error_returns_400(client: TestClient, service_key_headers):
+    response = client.post('/api/v1/inventory/fulfill', json={}, headers=service_key_headers)
+
+    assert response.status_code == 400
+
+
+def test_fulfill_empty_items_returns_400(client: TestClient, service_key_headers):
+    payload = _fulfill_payload()
+    payload['items'] = []  # min_length=1 нарушен
+    response = client.post('/api/v1/inventory/fulfill', json=payload, headers=service_key_headers)
+
+    assert response.status_code == 400
+
+
+def test_fulfill_zero_quantity_returns_400(client: TestClient, service_key_headers):
+    payload = _fulfill_payload()
+    payload['items'][0]['quantity'] = 0  # ge=1 нарушен
+    response = client.post('/api/v1/inventory/fulfill', json=payload, headers=service_key_headers)
+
+    assert response.status_code == 400
+
+
+def test_fulfill_invalid_order_id_returns_400(client: TestClient, service_key_headers):
+    payload = _fulfill_payload()
+    payload['order_id'] = 'not-a-uuid'
+    response = client.post('/api/v1/inventory/fulfill', json=payload, headers=service_key_headers)
 
     assert response.status_code == 400

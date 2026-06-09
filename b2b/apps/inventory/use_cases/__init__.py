@@ -1,2 +1,3 @@
+from .fulfill import FulfillInventoryUseCase as FulfillInventoryUseCase
 from .reserve import ReserveInventoryUseCase as ReserveInventoryUseCase
 from .unreserve import UnreserveInventoryUseCase as UnreserveInventoryUseCase

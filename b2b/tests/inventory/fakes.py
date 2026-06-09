@@ -13,6 +13,7 @@ from uuid import UUID
 from apps.inventory.enums import ReserveFailureReason
 from apps.inventory.errors import InventoryConflictError
 from apps.inventory.repositories.inventory_repository import (
+    FulfillItemResult,
     ReserveItemResult,
     UnreserveItemResult,
 )
@@ -57,6 +58,7 @@ class FakeInventoryRepository:
         self.skus: dict[UUID, dict[str, int]] = {}
         self.reserve_calls: list[list[tuple[UUID, int]]] = []
         self.unreserve_calls: list[list[tuple[UUID, int]]] = []
+        self.fulfill_calls: list[list[tuple[UUID, int]]] = []
 
     def add_sku(self, sku_id: UUID, *, active: int, reserved: int = 0) -> None:
         self.skus[sku_id] = {'active_quantity': active, 'reserved_quantity': reserved}
@@ -134,6 +136,24 @@ class FakeInventoryRepository:
             results.append(UnreserveItemResult(sku_id=sku_id))
         return results
 
+    async def fulfill(self, session: FakeSession, items: list[tuple[UUID, int]]) -> list[FulfillItemResult]:
+        """Списание резерва при доставке: reserved_quantity -= qty, active_quantity НЕ меняется."""
+        self.fulfill_calls.append(list(items))
+
+        sorted_ids = sorted({sku_id for sku_id, _ in items})
+        requested_by_id = {sku_id: qty for sku_id, qty in items}
+
+        results: list[FulfillItemResult] = []
+        for sku_id in sorted_ids:
+            sku = self.skus.get(sku_id)
+            if sku is None:
+                continue
+            qty = requested_by_id[sku_id]
+            sku['reserved_quantity'] -= qty
+            # active_quantity НЕ меняется (см. apps/inventory/repositories/inventory_repository.py:fulfill)
+            results.append(FulfillItemResult(sku_id=sku_id))
+        return results
+
 
 class FakeInboxRepository:
     """In-memory кеш processed_events. Ключ — (sender, idempotency_key)."""
@@ -177,3 +197,25 @@ class FakeOutboxRepository:
     async def enqueue_in_new_transaction(self, data: OutboxEnqueueSchema) -> Any:
         self.enqueued.append(data)
         return None
+
+
+class FakeFulfilledOrderRepository:
+    """In-memory журнал fulfilled_orders (UNIQUE(order_id, sku_id)).
+
+    Используется в тестах FulfillInventoryUseCase для проверки идемпотентности
+    по order_id — повторный fulfill с теми же (order_id, sku_id) не должен
+    вызывать `InventoryRepository.fulfill` для уже зафиксированных пар.
+    """
+
+    def __init__(self) -> None:
+        # Ключ — order_id; значение — словарь sku_id → quantity (последний записанный).
+        self.records: dict[UUID, dict[UUID, int]] = {}
+        # Лог записей (для assert'ов в тестах: сколько раз вызывался record и с какими аргументами).
+        self.record_calls: list[tuple[UUID, UUID, int]] = []
+
+    async def get_fulfilled_sku_ids(self, session: FakeSession, order_id: UUID) -> set[UUID]:
+        return set(self.records.get(order_id, {}).keys())
+
+    async def record(self, session: FakeSession, order_id: UUID, sku_id: UUID, quantity: int) -> None:
+        self.record_calls.append((order_id, sku_id, quantity))
+        self.records.setdefault(order_id, {})[sku_id] = quantity

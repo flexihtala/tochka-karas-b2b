@@ -37,8 +37,13 @@ class UnreserveItemResult:
     sku_id: UUID
 
 
+@dataclass(frozen=True)
+class FulfillItemResult:
+    sku_id: UUID
+
+
 class InventoryRepository:
-    """Узкий репозиторий: операции reserve/unreserve по списку (sku_id, qty).
+    """Узкий репозиторий: операции reserve/unreserve/fulfill по списку (sku_id, qty).
 
     Принимает `session: AsyncSession` извне. Use-case управляет границей
     транзакции.
@@ -157,6 +162,54 @@ class InventoryRepository:
             sku.reserved_quantity = sku.reserved_quantity - qty
             sku.active_quantity = sku.active_quantity + qty
             results.append(UnreserveItemResult(sku_id=sku_id))
+
+        await session.flush()
+        return results
+
+    async def fulfill(
+        self,
+        session: AsyncSession,
+        items: list[tuple[UUID, int]],
+    ) -> list[FulfillItemResult]:
+        """Списать резерв при доставке: для каждого SKU `reserved_quantity -= quantity`.
+
+        active_quantity **не меняется** — товар уже был исключён из доступного
+        остатка при reserve. Это финальное «забрали с полки».
+
+        Идемпотентность по `order_id` обеспечивается use-case'ом через таблицу
+        `fulfilled_orders` (UNIQUE(order_id, sku_id)). Этот метод не знает про
+        order_id: он принимает уже отфильтрованный список items, для которых
+        списание ещё не зафиксировано.
+
+        Поведение:
+          1. `SELECT ... FOR UPDATE` блокирует строки SKU (детерминированный
+             порядок sku_id для снижения риска deadlock'ов).
+          2. Несуществующие SKU игнорируются (best-effort, аналогично unreserve).
+          3. Для каждого присутствующего SKU: `reserved_quantity -= quantity`.
+             Канон не требует проверки `reserved_quantity >= quantity` (B2C — TR,
+             a fulfill идёт строго после успешного reserve). Если у конкретного
+             деплоя возникнет необходимость защититься от рассогласования —
+             добавить проверку здесь.
+        """
+        sorted_ids = sorted({sku_id for sku_id, _ in items})
+        if not sorted_ids:
+            return []
+        requested_by_id: dict[UUID, int] = {sku_id: qty for sku_id, qty in items}
+
+        stmt = select(SKU).where(SKU.id.in_(sorted_ids)).order_by(SKU.id).with_for_update()
+        result = await session.execute(stmt)
+        skus: list[SKU] = list(result.scalars().all())
+        skus_by_id: dict[UUID, SKU] = {sku.id: sku for sku in skus}
+
+        results: list[FulfillItemResult] = []
+        for sku_id in sorted_ids:
+            sku = skus_by_id.get(sku_id)
+            if sku is None:
+                continue
+            qty = requested_by_id[sku_id]
+            sku.reserved_quantity = sku.reserved_quantity - qty
+            # active_quantity НЕ меняется (см. docstring)
+            results.append(FulfillItemResult(sku_id=sku_id))
 
         await session.flush()
         return results
