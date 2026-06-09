@@ -17,7 +17,7 @@ class SKU(IDMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)
-    cost_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
     article: Mapped[str | None] = mapped_column(String(255), nullable=True)
     active_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
@@ -35,6 +35,14 @@ class SKU(IDMixin, TimestampMixin, Base):
         lazy='selectin',
     )
 
+    @property
+    def stock_quantity(self) -> int:
+        """Total on-hand stock per canon: stock_quantity = active_quantity + reserved_quantity.
+
+        Derived (not stored): the invariant is automatic and there is no risk of drift.
+        """
+        return self.active_quantity + self.reserved_quantity
+
     def __init__(
         self,
         *,
@@ -42,7 +50,7 @@ class SKU(IDMixin, TimestampMixin, Base):
         product_id: uuid.UUID,
         name: str,
         price: int,
-        cost_price: int,
+        cost_price: int | None = None,
         discount: int = 0,
         article: str | None = None,
         active_quantity: int = 0,

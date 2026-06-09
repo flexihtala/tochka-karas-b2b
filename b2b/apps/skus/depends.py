@@ -5,7 +5,7 @@ from apps.skus.repositories import (
     SKUImageRepository,
     SKURepository,
 )
-from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase, EditSKUUseCase
 
 
 class SKUsProvider(Provider):
@@ -15,3 +15,4 @@ class SKUsProvider(Provider):
 
     create_sku_use_case = provide(CreateSKUUseCase, scope=Scope.REQUEST)
     delete_sku_use_case = provide(DeleteSKUUseCase, scope=Scope.REQUEST)
+    edit_sku_use_case = provide(EditSKUUseCase, scope=Scope.REQUEST)

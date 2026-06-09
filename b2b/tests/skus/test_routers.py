@@ -11,47 +11,50 @@ from apps.errors import setup_error_handlers
 from apps.skus.errors import (
     ProductNotFoundError,
     SKUHardBlockedError,
-    SKUHasActiveReservesError,
     SKUImagesRequiredError,
     SKUNotFoundError,
     SKUNotOwnerError,
 )
 from apps.skus.routers import router as skus_router
-from apps.skus.schemas.request import SKUCreateRequestSchema
+from apps.skus.schemas.request import SKUCreateRequestSchema, SKUEditRequestSchema
 from apps.skus.schemas.response import (
     SKUCharacteristicResponseSchema,
     SKUImageResponseSchema,
     SKUResponseSchema,
 )
-from apps.skus.use_cases import CreateSKUUseCase, DeleteSKUUseCase
+from apps.skus.use_cases import CreateSKUUseCase, EditSKUUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
+
+
+def _make_response() -> SKUResponseSchema:
+    now = datetime.now(UTC)
+    return SKUResponseSchema(
+        id=uuid4(),
+        product_id=uuid4(),
+        name='256GB Black',
+        price=12_999_000,
+        cost_price=9_500_000,
+        discount=0,
+        article=None,
+        active_quantity=0,
+        reserved_quantity=0,
+        stock_quantity=0,
+        images=[
+            SKUImageResponseSchema(id=uuid4(), url='/s3/iphone15-black-256.jpg', ordering=0),
+        ],
+        characteristics=[
+            SKUCharacteristicResponseSchema(id=uuid4(), name='Цвет', value='Чёрный'),
+        ],
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class StubCreateSKUUseCase:
     def __init__(self):
         self.calls: list[tuple[SKUCreateRequestSchema, AuthenticatedUserSchema]] = []
         self.error: Exception | None = None
-        now = datetime.now(UTC)
-        sku_id = uuid4()
-        self.response = SKUResponseSchema(
-            id=sku_id,
-            product_id=uuid4(),
-            name='256GB Black',
-            price=12_999_000,
-            cost_price=9_500_000,
-            discount=0,
-            article=None,
-            active_quantity=0,
-            reserved_quantity=0,
-            images=[
-                SKUImageResponseSchema(id=uuid4(), url='/s3/iphone15-black-256.jpg', ordering=0),
-            ],
-            characteristics=[
-                SKUCharacteristicResponseSchema(id=uuid4(), name='Цвет', value='Чёрный'),
-            ],
-            created_at=now,
-            updated_at=now,
-        )
+        self.response = _make_response()
 
     async def __call__(
         self,
@@ -64,41 +67,43 @@ class StubCreateSKUUseCase:
         return self.response
 
 
-class StubDeleteSKUUseCase:
+class StubEditSKUUseCase:
     def __init__(self):
-        self.calls: list[tuple[UUID, AuthenticatedUserSchema]] = []
+        self.calls: list[tuple[UUID, SKUEditRequestSchema, AuthenticatedUserSchema]] = []
         self.error: Exception | None = None
+        self.response = _make_response()
 
-    async def __call__(self, sku_id: UUID, current_user: AuthenticatedUserSchema) -> None:
-        self.calls.append((sku_id, current_user))
+    async def __call__(
+        self,
+        sku_id: UUID,
+        data: SKUEditRequestSchema,
+        current_user: AuthenticatedUserSchema,
+    ) -> SKUResponseSchema:
+        self.calls.append((sku_id, data, current_user))
         if self.error:
             raise self.error
-        return None
+        return self.response
 
 
 class SKUsRouteProvider(Provider):
-    def __init__(
-        self,
-        create_stub: StubCreateSKUUseCase | None = None,
-        delete_stub: StubDeleteSKUUseCase | None = None,
-    ):
+    def __init__(self, stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
         super().__init__()
-        self.create_stub = create_stub or StubCreateSKUUseCase()
-        self.delete_stub = delete_stub or StubDeleteSKUUseCase()
+        self.stub = stub
+        self.edit_stub = edit_stub
 
     @provide(scope=Scope.REQUEST)
     def get_create_sku_use_case(self) -> CreateSKUUseCase:
-        return self.create_stub
+        return self.stub
 
     @provide(scope=Scope.REQUEST)
-    def get_delete_sku_use_case(self) -> DeleteSKUUseCase:
-        return self.delete_stub
+    def get_edit_sku_use_case(self) -> EditSKUUseCase:
+        return self.edit_stub
 
 
 def _make_app(
-    stub: StubCreateSKUUseCase | None,
+    stub: StubCreateSKUUseCase,
     user: AuthenticatedUserSchema | None,
-    delete_stub: StubDeleteSKUUseCase | None = None,
+    edit_stub: StubEditSKUUseCase | None = None,
 ) -> FastAPI:
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -113,7 +118,7 @@ def _make_app(
     setup_error_handlers(app)
     container = make_async_container(
         FastapiProvider(),
-        SKUsRouteProvider(create_stub=stub, delete_stub=delete_stub),
+        SKUsRouteProvider(stub, edit_stub or StubEditSKUUseCase()),
     )
     setup_dishka(container, app)
     return app
@@ -126,7 +131,6 @@ def _request_payload(product_id: UUID | None = None) -> dict:
         'price': 12_999_000,
         'cost_price': 9_500_000,
         'discount': 0,
-        'stock_quantity': 0,
         'images': [
             {'url': '/s3/iphone15-black-256.jpg', 'ordering': 0},
         ],
@@ -154,12 +158,54 @@ def test_create_sku_endpoint_returns_201(stub: StubCreateSKUUseCase):
     assert body['cost_price'] == 9_500_000
     assert body['active_quantity'] == 0
     assert body['reserved_quantity'] == 0
+    assert body['stock_quantity'] == 0
     assert len(body['images']) == 1
     assert len(body['characteristics']) == 1
     assert len(stub.calls) == 1
     request_data, current_user = stub.calls[0]
     assert request_data.name == '256GB Black'
     assert current_user.id == user.id
+
+
+def test_create_sku_endpoint_response_includes_stock_quantity(stub: StubCreateSKUUseCase):
+    """SKUResponse exposes stock_quantity per neomarket-protocols/b2b/openapi.yaml."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    response = client.post('/api/v1/skus', json=_request_payload())
+
+    assert response.status_code == 201
+    assert 'stock_quantity' in response.json()
+
+
+def test_create_sku_without_cost_price_returns_201(stub: StubCreateSKUUseCase):
+    """cost_price is optional per OpenAPI — omitting it must not 422."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    payload = _request_payload()
+    payload.pop('cost_price')
+
+    response = client.post('/api/v1/skus', json=payload)
+
+    assert response.status_code == 201
+    request_data, _ = stub.calls[0]
+    assert request_data.cost_price is None
+
+
+def test_create_sku_with_null_cost_price_returns_201(stub: StubCreateSKUUseCase):
+    """cost_price is nullable per OpenAPI — explicit null must not 422."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user))
+
+    payload = _request_payload()
+    payload['cost_price'] = None
+
+    response = client.post('/api/v1/skus', json=payload)
+
+    assert response.status_code == 201
+    request_data, _ = stub.calls[0]
+    assert request_data.cost_price is None
 
 
 def test_create_sku_unauthorized_returns_401(stub: StubCreateSKUUseCase):
@@ -246,102 +292,137 @@ def test_create_sku_missing_images_returns_400(stub: StubCreateSKUUseCase):
     assert body['message'] == 'Требуется минимум одно изображение'
 
 
-# --- DELETE /api/v1/skus/{sku_id} ---
+# ===========================================================================
+# PUT /api/v1/skus/{sku_id} — US-B2B-03
+# ===========================================================================
 
 
 @pytest.fixture
-def delete_stub() -> StubDeleteSKUUseCase:
-    return StubDeleteSKUUseCase()
+def edit_stub() -> StubEditSKUUseCase:
+    return StubEditSKUUseCase()
 
 
-def test_delete_sku_endpoint_returns_204(delete_stub: StubDeleteSKUUseCase):
+def _edit_request_payload() -> dict:
+    return {
+        'name': '256GB Black Titanium',
+        'price': 13_499_000,
+        'cost_price': 9_800_000,
+        'discount': 500_000,
+        'images': [
+            {'url': '/s3/iphone15-black-titanium.jpg', 'ordering': 0},
+        ],
+        'characteristics': [
+            {'name': 'Цвет', 'value': 'Чёрный титан'},
+        ],
+    }
+
+
+def test_edit_sku_endpoint_returns_200(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
     sku_id = uuid4()
 
-    response = client.delete(f'/api/v1/skus/{sku_id}')
+    response = client.patch(f'/api/v1/skus/{sku_id}', json=_edit_request_payload())
 
-    assert response.status_code == 204
-    assert response.content == b''
-    assert len(delete_stub.calls) == 1
-    called_sku_id, called_user = delete_stub.calls[0]
+    assert response.status_code == 200
+    body = response.json()
+    # Stub возвращает фиксированный ответ.
+    assert body['name'] == '256GB Black'
+    assert body['reserved_quantity'] == 0
+    assert len(edit_stub.calls) == 1
+    called_sku_id, request_data, current_user = edit_stub.calls[0]
     assert called_sku_id == sku_id
-    assert called_user.id == user.id
+    assert request_data.name == '256GB Black Titanium'
+    assert request_data.price == 13_499_000
+    assert current_user.id == user.id
 
 
-def test_delete_sku_unauthorized_returns_401(delete_stub: StubDeleteSKUUseCase):
-    client = TestClient(_make_app(stub=None, user=None, delete_stub=delete_stub))
+def test_edit_sku_unauthorized_returns_401(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    client = TestClient(_make_app(stub, user=None, edit_stub=edit_stub))
 
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 401
-    assert response.json() == {'code': 'UNAUTHORIZED', 'message': 'Unauthorized'}
-    assert delete_stub.calls == []
+    assert edit_stub.calls == []
 
 
-def test_delete_sku_non_seller_returns_403(delete_stub: StubDeleteSKUUseCase):
+def test_edit_sku_non_seller_returns_403(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'FORBIDDEN'
-    assert delete_stub.calls == []
 
 
-def test_delete_sku_not_found_returns_404(delete_stub: StubDeleteSKUUseCase):
-    delete_stub.error = SKUNotFoundError()
+def test_edit_sku_not_owner_returns_403(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    edit_stub.error = SKUNotOwnerError()
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
-
-    assert response.status_code == 404
-    assert response.json()['code'] == 'NOT_FOUND'
-
-
-def test_delete_sku_not_owner_returns_403(delete_stub: StubDeleteSKUUseCase):
-    delete_stub.error = SKUNotOwnerError(message='SKU does not belong to the authenticated seller')
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
-
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'NOT_OWNER'
 
 
-def test_delete_sku_hard_blocked_returns_403(delete_stub: StubDeleteSKUUseCase):
-    delete_stub.error = SKUHardBlockedError(message='Cannot delete SKU of hard-blocked product')
+def test_edit_sku_hard_blocked_returns_403(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    edit_stub.error = SKUHardBlockedError()
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
     assert response.status_code == 403
     assert response.json()['code'] == 'HARD_BLOCKED'
 
 
-def test_delete_sku_active_reserves_returns_409(delete_stub: StubDeleteSKUUseCase):
-    delete_stub.error = SKUHasActiveReservesError()
+def test_edit_sku_not_found_returns_404(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    edit_stub.error = SKUNotFoundError()
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.delete(f'/api/v1/skus/{uuid4()}')
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=_edit_request_payload())
 
-    assert response.status_code == 409
-    body = response.json()
-    assert body['code'] == 'HAS_ACTIVE_RESERVES'
-    assert body['message'] == 'Cannot delete SKU with active reserves'
+    assert response.status_code == 404
+    assert response.json()['code'] == 'NOT_FOUND'
 
 
-def test_delete_sku_invalid_uuid_returns_400(delete_stub: StubDeleteSKUUseCase):
+def test_edit_sku_validation_error_returns_400(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
-    client = TestClient(_make_app(stub=None, user=user, delete_stub=delete_stub))
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
 
-    response = client.delete('/api/v1/skus/not-a-uuid')
+    payload = _edit_request_payload()
+    payload['price'] = -100  # отрицательная цена недопустима (ge=0)
+
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=payload)
 
     assert response.status_code == 400
     assert response.json()['code'] == 'INVALID_REQUEST'
-    assert delete_stub.calls == []
+
+
+def test_edit_sku_missing_images_returns_400(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    edit_stub.error = SKUImagesRequiredError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
+
+    payload = _edit_request_payload()
+    payload['images'] = []
+
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json=payload)
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body['code'] == 'INVALID_REQUEST'
+
+
+def test_edit_sku_partial_body_accepted(stub: StubCreateSKUUseCase, edit_stub: StubEditSKUUseCase):
+    """SKUEditRequestSchema — все поля опциональны. Пустое тело валидно."""
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
+    client = TestClient(_make_app(stub, user, edit_stub=edit_stub))
+
+    response = client.patch(f'/api/v1/skus/{uuid4()}', json={})
+
+    assert response.status_code == 200
+    assert len(edit_stub.calls) == 1

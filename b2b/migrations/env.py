@@ -6,6 +6,9 @@ from sqlalchemy import pool
 from alembic import context
 from apps.auth import models as auth_models
 from apps.categories import models as categories_models
+from apps.inbox import models as inbox_models
+from apps.inventory import models as inventory_models
+from apps.invoices import models as invoices_models
 from apps.outbox import models as outbox_models
 from apps.products import models as products_models
 from apps.skus import models as skus_models
@@ -26,6 +29,9 @@ categories_models
 products_models
 skus_models
 outbox_models
+inbox_models
+inventory_models
+invoices_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
