@@ -135,7 +135,7 @@ def _buyer() -> AuthenticatedUserSchema:
     return AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
 
 
-def test_add_favorite_returns_204(stubs):
+def test_add_favorite_returns_201(stubs):
     add_stub, remove_stub, list_stub = stubs
     user = _buyer()
     product_id = uuid4()
@@ -145,17 +145,18 @@ def test_add_favorite_returns_204(stubs):
     )
 
     client = TestClient(_make_app(*stubs, user=user))
-    response = client.put(f'/api/v1/favorites/{product_id}')
+    response = client.post(f'/api/v1/favorites/{product_id}')
 
-    assert response.status_code == 204
-    assert response.text == ''
+    # Канон: первое добавление → 201.
+    assert response.status_code == 201
+    assert response.json()['product_id'] == str(product_id)
     # Use-case был вызван с product_id из path и user_id из JWT
     data, current_user = add_stub.calls[0]
     assert data.product_id == product_id
     assert current_user.id == user.id
 
 
-def test_add_favorite_idempotent_repeat_returns_204(stubs):
+def test_add_favorite_idempotent_repeat_returns_200(stubs):
     add_stub, remove_stub, list_stub = stubs
     user = _buyer()
     product_id = uuid4()
@@ -165,15 +166,16 @@ def test_add_favorite_idempotent_repeat_returns_204(stubs):
     )
 
     client = TestClient(_make_app(*stubs, user=user))
-    response = client.put(f'/api/v1/favorites/{product_id}')
+    response = client.post(f'/api/v1/favorites/{product_id}')
 
-    assert response.status_code == 204
+    # Канон: повторное добавление → 200 (не 409, не дубль).
+    assert response.status_code == 200
 
 
 def test_add_favorite_unauthorized_returns_401(stubs):
     client = TestClient(_make_app(*stubs, user=None))
 
-    response = client.put(f'/api/v1/favorites/{uuid4()}')
+    response = client.post(f'/api/v1/favorites/{uuid4()}')
 
     assert response.status_code == 401
 
@@ -182,7 +184,7 @@ def test_add_favorite_non_buyer_returns_403(stubs):
     user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.SELLER)
     client = TestClient(_make_app(*stubs, user=user))
 
-    response = client.put(f'/api/v1/favorites/{uuid4()}')
+    response = client.post(f'/api/v1/favorites/{uuid4()}')
 
     assert response.status_code == 403
 
@@ -191,7 +193,7 @@ def test_add_favorite_invalid_path_returns_400(stubs):
     user = _buyer()
     client = TestClient(_make_app(*stubs, user=user))
 
-    response = client.put('/api/v1/favorites/not-a-uuid')
+    response = client.post('/api/v1/favorites/not-a-uuid')
 
     assert response.status_code == 400
     assert response.json()['code'] == 'INVALID_REQUEST'
@@ -213,9 +215,9 @@ def test_user_id_from_query_is_ignored(stubs):
     client = TestClient(_make_app(*stubs, user=user))
 
     # Попытка передать чужой user_id в query — должна быть проигнорирована
-    response = client.put(f'/api/v1/favorites/{product_id}?user_id={attacker_target}')
+    response = client.post(f'/api/v1/favorites/{product_id}?user_id={attacker_target}')
 
-    assert response.status_code == 204
+    assert response.status_code == 201
 
     # Use-case был вызван именно с current_user (JWT), а не с чужим id
     data, current_user = add_stub.calls[0]

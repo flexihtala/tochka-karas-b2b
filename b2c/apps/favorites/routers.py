@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
 from apps.favorites.schemas.request import AddFavoriteRequestSchema
-from apps.favorites.schemas.response import FavoriteListResponseSchema
+from apps.favorites.schemas.response import FavoriteListResponseSchema, FavoriteResponseSchema
 from apps.favorites.use_cases import (
     AddFavoriteUseCase,
     ListFavoritesUseCase,
@@ -35,24 +35,27 @@ async def list_favorites(
     return await use_case(current_user)
 
 
-@router.put(
+@router.post(
     '/{product_id}',
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=FavoriteResponseSchema,
     responses=error_responses,
 )
 @inject
 async def add_favorite(
     product_id: UUID,
     use_case: FromDishka[AddFavoriteUseCase],
+    response: Response,
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
-) -> Response:
-    """PUT /api/v1/favorites/{product_id} — идемпотентное добавление в избранное.
+) -> FavoriteResponseSchema:
+    """POST /api/v1/favorites/{product_id} — добавление товара в избранное.
 
-    Всегда 204 (idempotent per openapi spec).
-    user_id — ТОЛЬКО из JWT, любой user_id в теле/query игнорируется (см. ADR).
+    Канон b2c-cart-flows#b2c-6-favorites: **201 при первом добавлении, 200 при
+    повторном** (идемпотентно — не 409, не дубль в БД). user_id — ТОЛЬКО из JWT,
+    любой user_id в теле/query игнорируется (см. ADR).
     """
-    await use_case(AddFavoriteRequestSchema(product_id=product_id), current_user)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    result = await use_case(AddFavoriteRequestSchema(product_id=product_id), current_user)
+    response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+    return result.favorite
 
 
 @router.delete('/{product_id}', status_code=status.HTTP_204_NO_CONTENT, responses=error_responses)
