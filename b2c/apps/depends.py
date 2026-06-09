@@ -9,6 +9,7 @@ from apps.categories.depends import CategoriesProvider
 from apps.favorites.depends import FavoritesProvider
 from apps.orders.depends import OrdersProvider
 from apps.payment_methods.depends import PaymentMethodsProvider
+from apps.subscriptions.depends import SubscriptionsProvider
 from shared.db import SessionManager
 from settings import B2CSettings, settings
 
@@ -34,4 +35,5 @@ providers = [
     OrdersProvider(),
     CategoriesProvider(),
     FavoritesProvider(),
+    SubscriptionsProvider(),
 ]
