@@ -24,6 +24,17 @@ cd b2c
 uv run pytest -v
 ```
 
+## ADR — Идентификация пользователя в `/favorites` (US-CART-01)
+
+Источник `user_id` для всех `/favorites` эндпоинтов (POST, DELETE, GET) — **только JWT
+claim `sub`**. Альтернативы — query-параметр `?user_id=...` (как в исходном OpenAPI)
+и заголовок `X-User-Id` — отклонены: оба позволяют клиенту подделать идентификатор
+владельца и совершить IDOR (добавить/удалить избранное чужому пользователю). При
+выборе JWT любая попытка передать `user_id` в теле/query/заголовках просто
+игнорируется (схема запроса использует `extra='ignore'`), а DELETE физически
+ограничен `WHERE user_id = current_user.id`. Критерий: предотвращение IDOR
+(см. `neomarket-canon/security-guidelines.md`).
+
 ## ADR — Хранение иерархии категорий (US-CAT-05)
 
 Рассмотрены три варианта: PostgreSQL `ltree`, adjacency-list (`parent_id`),
