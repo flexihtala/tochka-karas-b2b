@@ -16,7 +16,8 @@ from apps.catalog.schemas import (
     CatalogPaginatedResponseSchema,
     CatalogProductDetailResponseSchema,
 )
-from apps.catalog.use_cases import GetFacetsUseCase, GetProductUseCase, ListProductsUseCase
+from apps.catalog.schemas.response import CatalogProductCardSchema
+from apps.catalog.use_cases import GetFacetsUseCase, GetProductUseCase, GetSimilarUseCase, ListProductsUseCase
 
 router = APIRouter()
 
@@ -84,3 +85,23 @@ async def get_product(
     use_case: FromDishka[GetProductUseCase],
 ) -> CatalogProductDetailResponseSchema:
     return await use_case(product_id)
+
+
+@router.get(
+    '/catalog/products/{product_id}/similar',
+    response_model=list[CatalogProductCardSchema],
+    responses=error_responses,
+)
+@inject
+async def get_similar_products(
+    product_id: UUID,
+    use_case: FromDishka[GetSimilarUseCase],
+    limit: int = Query(default=10, ge=1, le=50),
+) -> list[CatalogProductCardSchema]:
+    """GET /api/v1/catalog/products/{id}/similar — flat array per openapi spec.
+
+    Spec defines a flat array of CatalogProductCard with single `limit` query
+    (default 10, max 50). No offset/total_count — random selection on B2B side.
+    """
+    paginated = await use_case(product_id, limit=limit, offset=0)
+    return paginated.items
