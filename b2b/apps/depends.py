@@ -1,7 +1,14 @@
 from dishka import Provider, Scope, provide
 
 from apps.auth.depends import AuthProvider
+from apps.events.depends import EventsProvider
+from apps.inbox.depends import InboxProvider
+from apps.inventory.depends import InventoryProvider
+from apps.invoices.depends import InvoicesProvider
+from apps.outbox.depends import OutboxProvider
 from apps.products.depends import ProductsProvider
+from apps.public.depends import PublicProvider
+from apps.skus.depends import SKUsProvider
 from db import SessionManager
 from settings import Settings, settings
 
@@ -16,4 +23,15 @@ class CoreProvider(Provider):
         return SessionManager(settings)
 
 
-providers = [CoreProvider(), AuthProvider(), ProductsProvider()]
+providers = [
+    CoreProvider(),
+    AuthProvider(),
+    ProductsProvider(),
+    SKUsProvider(),
+    PublicProvider(),
+    InvoicesProvider(),
+    OutboxProvider(),
+    InventoryProvider(),
+    InboxProvider(),
+    EventsProvider(),
+]

@@ -1,0 +1,1 @@
+from .catalog_repository import PublicCatalogRepository as PublicCatalogRepository

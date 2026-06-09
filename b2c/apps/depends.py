@@ -3,7 +3,11 @@ from dishka import Provider, Scope, provide
 from apps.addresses.depends import AddressesProvider
 from apps.auth.depends import AuthProvider
 from apps.buyers.depends import BuyersProvider
+from apps.cart.depends import CartProvider
+from apps.catalog.depends import CatalogProvider
+from apps.categories.depends import CategoriesProvider
 from apps.favorites.depends import FavoritesProvider
+from apps.orders.depends import OrdersProvider
 from apps.payment_methods.depends import PaymentMethodsProvider
 from shared.db import SessionManager
 from settings import B2CSettings, settings
@@ -25,5 +29,9 @@ providers = [
     BuyersProvider(),
     AddressesProvider(),
     PaymentMethodsProvider(),
+    CatalogProvider(),
+    CartProvider(),
+    OrdersProvider(),
+    CategoriesProvider(),
     FavoritesProvider(),
 ]
