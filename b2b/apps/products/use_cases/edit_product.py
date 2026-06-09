@@ -13,6 +13,9 @@
 - images/characteristics — атомарная замена: delete_by_product + bulk create
   (только если поле передано в теле; None → не трогаем).
 - Валидация полей идентична POST /products.
+- Ответ — полный ``ProductResponse`` (seller-view): включает актуальный список
+  ``skus`` товара с их картинками и характеристиками (как GET /products/{id}),
+  чтобы клиент после правки видел товар целиком, а не пустой набор вариантов.
 """
 
 from uuid import UUID, uuid4
@@ -46,7 +49,16 @@ from apps.products.schemas.response import (
     ProductImageResponseSchema,
     ProductResponseSchema,
 )
-from apps.skus.repositories import SKURepository
+from apps.skus.repositories import (
+    SKUCharacteristicValueRepository,
+    SKUImageRepository,
+    SKURepository,
+)
+from apps.skus.schemas.response import (
+    SKUCharacteristicResponseSchema,
+    SKUImageResponseSchema,
+    SKUResponseSchema,
+)
 from shared.auth_lib import AuthenticatedUserSchema
 from shared.outbox import OutboxEnqueueSchema
 from shared.types import ServiceName
@@ -63,6 +75,8 @@ class EditProductUseCase:
         characteristic_repository: CharacteristicValueRepository,
         category_repository: CategoryRepository,
         sku_repository: SKURepository,
+        sku_image_repository: SKUImageRepository,
+        sku_characteristic_repository: SKUCharacteristicValueRepository,
         outbox_repository: B2BOutboxRepository,
     ):
         self.product_repository = product_repository
@@ -70,6 +84,8 @@ class EditProductUseCase:
         self.characteristic_repository = characteristic_repository
         self.category_repository = category_repository
         self.sku_repository = sku_repository
+        self.sku_image_repository = sku_image_repository
+        self.sku_characteristic_repository = sku_characteristic_repository
         self.outbox_repository = outbox_repository
 
     async def __call__(
@@ -96,7 +112,47 @@ class EditProductUseCase:
 
         product = await self._maybe_return_to_moderation(product)
 
-        return self._build_response(product, images, characteristics)
+        skus = await self._load_skus(product.id)
+
+        return self._build_response(product, images, characteristics, skus)
+
+    async def _load_skus(self, product_id: UUID) -> list[SKUResponseSchema]:
+        """Полный seller-view список SKU товара с картинками и характеристиками.
+
+        Идентично GET /products/{id} (US-B2B-05): для каждого SKU подтягиваются
+        его изображения и характеристики. ``stock_quantity`` — derived-свойство
+        SKU (active + reserved), уже посчитано в read-схеме.
+        """
+        skus = await self.sku_repository.list_full_by_product(product_id)
+        result: list[SKUResponseSchema] = []
+        for sku in skus:
+            sku_images = await self.sku_image_repository.list_by_sku(sku.id)
+            sku_characteristics = await self.sku_characteristic_repository.list_by_sku(sku.id)
+            result.append(
+                SKUResponseSchema(
+                    id=sku.id,
+                    product_id=sku.product_id,
+                    name=sku.name,
+                    price=sku.price,
+                    discount=sku.discount,
+                    cost_price=sku.cost_price,
+                    stock_quantity=sku.stock_quantity,
+                    active_quantity=sku.active_quantity,
+                    reserved_quantity=sku.reserved_quantity,
+                    article=sku.article,
+                    images=[
+                        SKUImageResponseSchema(id=image.id, url=image.url, ordering=image.ordering)
+                        for image in sku_images
+                    ],
+                    characteristics=[
+                        SKUCharacteristicResponseSchema(id=c.id, name=c.name, value=c.value)
+                        for c in sku_characteristics
+                    ],
+                    created_at=sku.created_at,
+                    updated_at=sku.updated_at,
+                )
+            )
+        return result
 
     async def _load_product(self, product_id: UUID, current_user: AuthenticatedUserSchema) -> ProductReadSchema:
         product = await self.product_repository.get_or_none(product_id)
@@ -213,6 +269,7 @@ class EditProductUseCase:
         product: ProductReadSchema,
         images: list[ProductImageReadSchema],
         characteristics: list[CharacteristicValueReadSchema],
+        skus: list[SKUResponseSchema],
     ) -> ProductResponseSchema:
         return ProductResponseSchema(
             id=product.id,
@@ -231,7 +288,7 @@ class EditProductUseCase:
             characteristics=[
                 CharacteristicResponseSchema(id=ch.id, name=ch.name, value=ch.value) for ch in characteristics
             ],
-            skus=[],
+            skus=skus,
             created_at=product.created_at,
             updated_at=product.updated_at,
         )
