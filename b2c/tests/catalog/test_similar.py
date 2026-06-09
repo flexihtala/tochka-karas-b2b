@@ -21,21 +21,21 @@ from apps.catalog.routers import router as catalog_router
 from apps.catalog.schemas.response import CatalogPaginatedResponseSchema
 from apps.catalog.use_cases import GetSimilarUseCase
 from apps.errors import setup_error_handlers
-from tests.catalog.fakes import MockTransportServiceClient, make_handler
+from tests.catalog.fakes import make_handler, make_service_client
 
 
 def _b2b(handler) -> B2BCatalogClient:
-    return B2BCatalogClient(service_client=MockTransportServiceClient(handler=handler))
+    return B2BCatalogClient(service_client=make_service_client(handler))
 
 
-def _make_card(product_id, title='X', price=100000) -> dict:
+def _make_card(product_id, title='X', min_price=100000) -> dict:
+    """B2B ProductPublicShortResponse-форма (то, что отдаёт /public/products/{id}/similar)."""
     return {
         'id': str(product_id),
         'title': title,
-        'image': f'https://x/{product_id}.jpg',
-        'price': price,
-        'in_stock': True,
-        'is_in_cart': False,
+        'slug': f'slug-{product_id}',
+        'min_price': min_price,
+        'cover_image': f'https://x/{product_id}.jpg',
     }
 
 
@@ -48,7 +48,7 @@ async def test_similar_returns_up_to_8_from_same_category():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}/similar': (
+            f'GET /api/v1/public/products/{product_id}/similar': (
                 200,
                 {
                     'items': [_make_card(pid, title=f'item-{i}') for i, pid in enumerate(similar_ids)],
@@ -77,7 +77,7 @@ async def test_empty_category_returns_200_empty_list():
     product_id = uuid4()
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}/similar': (
+            f'GET /api/v1/public/products/{product_id}/similar': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 8, 'offset': 0},
             ),
@@ -114,7 +114,7 @@ async def test_similar_uses_default_limit_8():
 
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}/similar': (
+            f'GET /api/v1/public/products/{product_id}/similar': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 8, 'offset': 0},
             ),
@@ -134,7 +134,7 @@ async def test_similar_limit_capped_at_max():
     captured: list[httpx.Request] = []
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}/similar': (
+            f'GET /api/v1/public/products/{product_id}/similar': (
                 200,
                 {'items': [], 'total_count': 0, 'limit': 20, 'offset': 0},
             ),
@@ -156,7 +156,7 @@ async def test_similar_b2b_returns_bare_list():
     similar_id = uuid4()
     handler = make_handler(
         responses={
-            f'GET /api/v1/catalog/products/{product_id}/similar': (
+            f'GET /api/v1/public/products/{product_id}/similar': (
                 200,
                 # NOTE: handler выдаст response.json() = []
                 # но make_handler не умеет list — обернём по-другому.

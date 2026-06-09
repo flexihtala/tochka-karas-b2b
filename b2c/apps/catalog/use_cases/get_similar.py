@@ -1,6 +1,7 @@
 """US-CAT-04: GET /api/v1/products/{id}/similar — похожие товары.
 
-Проксирует к B2B `/api/v1/catalog/products/{id}/similar`. Алгоритм подбора
+Проксирует к B2B `/api/v1/public/products/{id}/similar` и маппит ответ
+(ProductPublicShortResponse) в B2C CatalogProductCard. Алгоритм подбора
 (рандом из той же категории, fallback на родительскую) живёт на B2B-стороне.
 
 ADR (алгоритм подбора): ORDER BY RANDOM() / by characteristic match / cache.
@@ -18,7 +19,11 @@ from uuid import UUID
 
 from apps.catalog.clients import B2BCatalogClient
 from apps.catalog.errors import CatalogUnavailableError, ProductNotFoundError
-from apps.catalog.schemas.response import CatalogPaginatedResponseSchema
+from apps.catalog.schemas.response import (
+    CatalogPaginatedResponseSchema,
+    CatalogProductCardSchema,
+    ImageRefSchema,
+)
 from shared.http_clients import ServiceClientError
 
 
@@ -53,12 +58,37 @@ class GetSimilarUseCase:
         except Exception as exc:
             raise CatalogUnavailableError() from exc
 
-        # Нормализация: если B2B вернул пустой { items: [] } или просто [] —
-        # обрабатываем оба варианта.
+        # B2B может вернуть {items:[...]} или просто [...] — поддерживаем оба.
         if isinstance(payload, list):
-            payload = {'items': payload, 'total_count': len(payload), 'limit': limit, 'offset': offset}
-        payload.setdefault('total_count', len(payload.get('items', [])))
-        payload.setdefault('limit', limit)
-        payload.setdefault('offset', offset)
+            items_payload = payload
+            total_count = len(payload)
+        else:
+            items_payload = payload.get('items') or []
+            total_count = int(payload.get('total_count', len(items_payload)) or 0)
 
-        return CatalogPaginatedResponseSchema.model_validate(payload)
+        # Маппинг B2B ProductPublicShortResponse → B2C CatalogProductCard
+        # (как в ListProductsUseCase): name←title, images←[cover_image], has_stock←true
+        # (B2B-выдача содержит только товары в наличии).
+        items: list[CatalogProductCardSchema] = []
+        for item in items_payload:
+            cover_image = item.get('cover_image')
+            images: list[ImageRefSchema] = []
+            if cover_image:
+                images = [ImageRefSchema(id=item['id'], url=cover_image, ordering=0, is_main=True)]
+            items.append(
+                CatalogProductCardSchema(
+                    id=item['id'],
+                    name=item.get('title') or item.get('name') or '',
+                    slug=item.get('slug'),
+                    min_price=int(item.get('min_price', 0) or 0),
+                    has_stock=True,
+                    images=images,
+                )
+            )
+
+        return CatalogPaginatedResponseSchema(
+            items=items,
+            total_count=total_count,
+            limit=limit,
+            offset=offset,
+        )
