@@ -65,3 +65,61 @@ class BannerClickUpdateSchema(UpdateUUIDSchema):
 
     banner_id: UUID | None = None
     user_id: UUID | None = None
+
+
+class CollectionCreateSchema(CreateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str
+    title: str
+    description: str | None = None
+    position: int = 0
+    is_active: bool = True
+
+
+class CollectionReadSchema(ReadUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str
+    title: str
+    description: str | None
+    position: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CollectionUpdateSchema(UpdateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str | None = None
+    title: str | None = None
+    description: str | None = None
+    position: int | None = None
+    is_active: bool | None = None
+
+
+class CollectionItemCreateSchema(CreateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    collection_id: UUID
+    product_id: UUID
+    ordering: int = 0
+
+
+class CollectionItemReadSchema(ReadUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    collection_id: UUID
+    product_id: UUID
+    ordering: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class CollectionItemUpdateSchema(UpdateUUIDSchema):
+    model_config = ConfigDict(from_attributes=True)
+
+    collection_id: UUID | None = None
+    product_id: UUID | None = None
+    ordering: int | None = None

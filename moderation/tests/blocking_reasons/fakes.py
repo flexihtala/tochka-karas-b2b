@@ -93,3 +93,19 @@ class FakeBlockingReasonRepository:
     def add(self, reason: BlockingReasonReadSchema) -> None:
         self.by_id[reason.id] = reason
         self.by_code[reason.code] = reason
+
+
+class FakeTicketReferenceRepository:
+    """Fake контракта TicketRepository.exists_with_blocking_reason.
+
+    DeleteBlockingReasonUseCase использует из TicketRepository только проверку
+    «ссылается ли тикет на причину», поэтому fake реализует ровно этот метод.
+    """
+
+    def __init__(self, referenced_reason_ids: set[UUID] | None = None):
+        self.referenced_reason_ids = referenced_reason_ids if referenced_reason_ids is not None else set()
+        self.calls: list[UUID] = []
+
+    async def exists_with_blocking_reason(self, reason_id: UUID) -> bool:
+        self.calls.append(reason_id)
+        return reason_id in self.referenced_reason_ids

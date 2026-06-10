@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query
 from apps.auth.schemas import ErrorResponseSchema
 from apps.categories.schemas import (
     BreadcrumbsResponseSchema,
+    CategoryRefSchema,
     CategoryResponseSchema,
     CategoryTreeNodeSchema,
     CategoryTreeResponseSchema,
@@ -14,6 +15,7 @@ from apps.categories.schemas import (
 from apps.categories.use_cases import (
     GetBreadcrumbsUseCase,
     GetCategoryUseCase,
+    GetFlatCategoriesUseCase,
     GetTreeUseCase,
 )
 
@@ -25,6 +27,23 @@ error_responses = {
     404: {'model': ErrorResponseSchema},
     422: {'model': ErrorResponseSchema},
 }
+
+
+@router.get(
+    '',
+    response_model=list[CategoryRefSchema],
+    responses={422: {'model': ErrorResponseSchema}},
+)
+@inject
+async def get_categories_flat(
+    use_case: FromDishka[GetFlatCategoriesUseCase],
+) -> list[CategoryRefSchema]:
+    """GET /api/v1/catalog/categories — плоский список всех категорий (CategoryRef).
+
+    Каждый элемент содержит level (корень = 0) и path (имена от корня
+    включая текущую). Сломанная иерархия (orphan-нода) → 422.
+    """
+    return await use_case()
 
 
 @router.get(

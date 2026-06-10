@@ -1,0 +1,2 @@
+from .b2b_products_client import B2BProductsClient as B2BProductsClient
+from .b2b_products_client import B2BProductSchema as B2BProductSchema

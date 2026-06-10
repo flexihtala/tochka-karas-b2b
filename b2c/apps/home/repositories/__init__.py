@@ -1,2 +1,4 @@
 from .banner_click_repository import BannerClickRepository as BannerClickRepository
 from .banner_repository import BannerRepository as BannerRepository
+from .collection_item_repository import CollectionItemRepository as CollectionItemRepository
+from .collection_repository import CollectionRepository as CollectionRepository

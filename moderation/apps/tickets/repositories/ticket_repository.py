@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.tickets.enums import TicketStatus
@@ -48,6 +48,19 @@ class TicketRepository(
             total_count = count_result.scalar_one()
 
         return [self.model_validate(m) for m in items], total_count
+
+    async def exists_with_blocking_reason(self, reason_id: UUID) -> bool:
+        """SELECT EXISTS: ссылается ли хоть один тикет на причину блокировки.
+
+        Используется справочником причин (US-MOD-06): причину, на которую ссылается
+        карточка модерации, нельзя удалить через DELETE — только 409. Тикет хранит
+        одну FK (blocking_reason_id — первая выбранная причина); полный список причин
+        уходит в outbox payload и не является долговременной ссылкой.
+        """
+        stmt = select(exists().where(Ticket.blocking_reason_id == reason_id))
+        async with self.session_manager.get_session() as session:
+            result = await session.execute(stmt)
+        return bool(result.scalar())
 
     async def claim_next(self, moderator_id: UUID) -> TicketReadSchema | None:
         """Атомарно захватить следующий PENDING-тикет.

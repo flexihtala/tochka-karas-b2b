@@ -1,2 +1,4 @@
 from .click_banner import ClickBannerUseCase as ClickBannerUseCase
+from .get_collection_products import GetCollectionProductsUseCase as GetCollectionProductsUseCase
 from .list_banners import ListBannersUseCase as ListBannersUseCase
+from .list_collections import ListCollectionsUseCase as ListCollectionsUseCase
