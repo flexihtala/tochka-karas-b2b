@@ -49,6 +49,7 @@ class MergeCartUseCase:
                     CartItemCreateSchema(
                         cart_id=auth_cart.id,
                         sku_id=guest_item.sku_id,
+                        product_id=guest_item.product_id,
                         quantity=guest_item.quantity,
                     )
                 )

@@ -10,33 +10,31 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from apps.cart.errors import CartItemNotFoundError
+from apps.cart.errors import CartItemNotFoundError, InsufficientStockError, SkuUnavailableError
 from apps.cart.routers import router as cart_router
 from apps.cart.schemas.db import CartItemReadSchema
 from apps.cart.schemas.request import CartItemAddRequestSchema, CartItemUpdateRequestSchema
-from apps.cart.schemas.response import CartItemResponseSchema, CartResponseSchema
+from apps.cart.schemas.response import (
+    CartItemResponseSchema,
+    CartResponseSchema,
+    CartValidationResponseSchema,
+)
 from apps.cart.use_cases import (
     AddItemUseCase,
+    ClearCartUseCase,
     GetCartUseCase,
     MergeCartUseCase,
     RemoveItemUseCase,
     UpdateItemUseCase,
+    ValidateCartUseCase,
 )
 from apps.cart.use_cases.add_item import AddItemResult
 from apps.errors import setup_error_handlers
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
-def _empty_response(user_id: UUID | None = None, session_id: str | None = None) -> CartResponseSchema:
-    return CartResponseSchema(
-        id=uuid4(),
-        user_id=user_id,
-        session_id=session_id,
-        items=[],
-        total_amount=0,
-        items_count=0,
-        updated_at=datetime.now(UTC),
-    )
+def _empty_response() -> CartResponseSchema:
+    return CartResponseSchema(id=uuid4(), updated_at=datetime.now(UTC))
 
 
 class StubAddItem:
@@ -60,6 +58,7 @@ class StubAddItem:
             id=uuid4(),
             cart_id=uuid4(),
             sku_id=data.sku_id,
+            product_id=uuid4(),
             quantity=data.quantity,
             created_at=now,
             updated_at=now,
@@ -88,6 +87,7 @@ class StubUpdateItem:
             id=item_id,
             cart_id=uuid4(),
             sku_id=uuid4(),
+            product_id=uuid4(),
             quantity=data.quantity,
             created_at=now,
             updated_at=now,
@@ -123,7 +123,7 @@ class StubGetCart:
         session_id: str | None,
     ) -> CartResponseSchema:
         self.calls.append((user_id, session_id))
-        return self.response or _empty_response(user_id=user_id, session_id=session_id)
+        return self.response or _empty_response()
 
 
 class StubMergeCart:
@@ -137,51 +137,70 @@ class StubMergeCart:
             raise self.error
 
 
+class StubClearCart:
+    def __init__(self):
+        self.calls: list[tuple[UUID | None, str | None]] = []
+
+    async def __call__(self, *, user_id: UUID | None, session_id: str | None) -> None:
+        self.calls.append((user_id, session_id))
+
+
+class StubValidateCart:
+    def __init__(self):
+        self.calls: list[tuple[UUID | None, str | None]] = []
+        self.response: CartValidationResponseSchema | None = None
+
+    async def __call__(self, *, user_id: UUID | None, session_id: str | None) -> CartValidationResponseSchema:
+        self.calls.append((user_id, session_id))
+        return self.response or CartValidationResponseSchema(is_valid=True, cart=_empty_response(), issues=[])
+
+
 class CartRouteProvider(Provider):
-    def __init__(
-        self,
-        add_stub: StubAddItem,
-        update_stub: StubUpdateItem,
-        remove_stub: StubRemoveItem,
-        get_stub: StubGetCart,
-        merge_stub: StubMergeCart,
-    ):
+    def __init__(self, stubs: 'Stubs'):
         super().__init__()
-        self.add_stub = add_stub
-        self.update_stub = update_stub
-        self.remove_stub = remove_stub
-        self.get_stub = get_stub
-        self.merge_stub = merge_stub
+        self.stubs = stubs
 
     @provide(scope=Scope.REQUEST)
     def get_add(self) -> AddItemUseCase:
-        return self.add_stub
+        return self.stubs.add
 
     @provide(scope=Scope.REQUEST)
     def get_update(self) -> UpdateItemUseCase:
-        return self.update_stub
+        return self.stubs.update
 
     @provide(scope=Scope.REQUEST)
     def get_remove(self) -> RemoveItemUseCase:
-        return self.remove_stub
+        return self.stubs.remove
 
     @provide(scope=Scope.REQUEST)
     def get_get(self) -> GetCartUseCase:
-        return self.get_stub
+        return self.stubs.get
 
     @provide(scope=Scope.REQUEST)
     def get_merge(self) -> MergeCartUseCase:
-        return self.merge_stub
+        return self.stubs.merge
+
+    @provide(scope=Scope.REQUEST)
+    def get_clear(self) -> ClearCartUseCase:
+        return self.stubs.clear
+
+    @provide(scope=Scope.REQUEST)
+    def get_validate(self) -> ValidateCartUseCase:
+        return self.stubs.validate
 
 
-def _make_app(
-    add_stub: StubAddItem,
-    update_stub: StubUpdateItem,
-    remove_stub: StubRemoveItem,
-    get_stub: StubGetCart,
-    merge_stub: StubMergeCart,
-    user: AuthenticatedUserSchema | None,
-) -> FastAPI:
+class Stubs:
+    def __init__(self):
+        self.add = StubAddItem()
+        self.update = StubUpdateItem()
+        self.remove = StubRemoveItem()
+        self.get = StubGetCart()
+        self.merge = StubMergeCart()
+        self.clear = StubClearCart()
+        self.validate = StubValidateCart()
+
+
+def _make_app(stubs: Stubs, user: AuthenticatedUserSchema | None) -> FastAPI:
     class _UserInjector(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             request.state.user = user
@@ -191,49 +210,42 @@ def _make_app(
     app.add_middleware(_UserInjector)
     app.include_router(cart_router, prefix='/api/v1')
     setup_error_handlers(app)
-    container = make_async_container(
-        FastapiProvider(),
-        CartRouteProvider(add_stub, update_stub, remove_stub, get_stub, merge_stub),
-    )
+    container = make_async_container(FastapiProvider(), CartRouteProvider(stubs))
     setup_dishka(container, app)
     return app
 
 
 @pytest.fixture
-def stubs():
-    return (
-        StubAddItem(),
-        StubUpdateItem(),
-        StubRemoveItem(),
-        StubGetCart(),
-        StubMergeCart(),
-    )
+def stubs() -> Stubs:
+    return Stubs()
+
+
+def _buyer() -> AuthenticatedUserSchema:
+    return AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
 
 
 def test_get_cart_returns_200_for_authenticated_buyer(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.get('/api/v1/cart')
 
     assert response.status_code == 200
-    assert get_stub.calls == [(user.id, None)]
+    assert stubs.get.calls == [(user.id, None)]
 
 
 def test_get_cart_returns_200_for_guest_with_session_id(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
     session_id = str(uuid4())
-    client = TestClient(_make_app(*stubs, user=None))
+    client = TestClient(_make_app(stubs, user=None))
 
     response = client.get('/api/v1/cart', headers={'X-Session-Id': session_id})
 
     assert response.status_code == 200
-    assert get_stub.calls == [(None, session_id)]
+    assert stubs.get.calls == [(None, session_id)]
 
 
 def test_get_cart_returns_400_without_identity(stubs):
-    client = TestClient(_make_app(*stubs, user=None))
+    client = TestClient(_make_app(stubs, user=None))
 
     response = client.get('/api/v1/cart')
 
@@ -242,37 +254,64 @@ def test_get_cart_returns_400_without_identity(stubs):
 
 
 def test_get_cart_ignores_session_id_when_authenticated(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.get('/api/v1/cart', headers={'X-Session-Id': str(uuid4())})
 
     assert response.status_code == 200
     # Session ID должен игнорироваться — see Flow B2C-8, §IDOR
-    assert get_stub.calls == [(user.id, None)]
+    assert stubs.get.calls == [(user.id, None)]
+
+
+def test_clear_cart_returns_204(stubs):
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
+
+    response = client.delete('/api/v1/cart')
+
+    assert response.status_code == 204
+    assert response.content == b''
+    assert stubs.clear.calls == [(user.id, None)]
+
+
+def test_clear_cart_guest_uses_session(stubs):
+    session_id = str(uuid4())
+    client = TestClient(_make_app(stubs, user=None))
+
+    response = client.delete('/api/v1/cart', headers={'X-Session-Id': session_id})
+
+    assert response.status_code == 204
+    assert stubs.clear.calls == [(None, session_id)]
+
+
+def test_clear_cart_requires_identity(stubs):
+    client = TestClient(_make_app(stubs, user=None))
+
+    response = client.delete('/api/v1/cart')
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'MISSING_CART_IDENTITY'
 
 
 def test_add_item_returns_201_when_created(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    add_stub.created = True
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    stubs.add.created = True
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     sku_id = uuid4()
     response = client.post('/api/v1/cart/items', json={'sku_id': str(sku_id), 'quantity': 2})
 
     assert response.status_code == 201
-    payload, _, _ = add_stub.calls[0]
+    payload, _, _ = stubs.add.calls[0]
     assert payload.sku_id == sku_id
     assert payload.quantity == 2
 
 
 def test_add_item_returns_200_when_incremented(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    add_stub.created = False  # SKU уже был — инкремент
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    stubs.add.created = False  # SKU уже был — инкремент
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.post('/api/v1/cart/items', json={'sku_id': str(uuid4()), 'quantity': 1})
 
@@ -280,33 +319,55 @@ def test_add_item_returns_200_when_incremented(stubs):
 
 
 def test_add_item_validation_error_for_zero_quantity(stubs):
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.post('/api/v1/cart/items', json={'sku_id': str(uuid4()), 'quantity': 0})
 
     assert response.status_code == 400
 
 
-def test_patch_item_returns_200(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
-    item_id = uuid4()
+def test_add_item_returns_404_when_sku_unavailable(stubs):
+    stubs.add.error = SkuUnavailableError()
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
-    response = client.patch(f'/api/v1/cart/items/{item_id}', json={'quantity': 5})
+    response = client.post('/api/v1/cart/items', json={'sku_id': str(uuid4()), 'quantity': 1})
 
+    assert response.status_code == 404
+    assert response.json()['code'] == 'SKU_NOT_FOUND'
+
+
+def test_add_item_returns_409_when_insufficient_stock(stubs):
+    stubs.add.error = InsufficientStockError()
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
+
+    response = client.post('/api/v1/cart/items', json={'sku_id': str(uuid4()), 'quantity': 99})
+
+    assert response.status_code == 409
+    assert response.json()['code'] == 'INSUFFICIENT_STOCK'
+
+
+def test_patch_item_returns_200_cart(stubs):
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
+    sku_id = uuid4()
+
+    response = client.patch(f'/api/v1/cart/items/{sku_id}', json={'quantity': 5})
+
+    # Per openapi spec: PATCH returns the full updated cart, not a single item.
     assert response.status_code == 200
-    assert response.json()['quantity'] == 5
-    assert update_stub.calls[0][0] == item_id
-    assert update_stub.calls[0][1].quantity == 5
+    body = response.json()
+    assert 'items' in body
+    assert stubs.update.calls[0][0] == sku_id
+    assert stubs.update.calls[0][1].quantity == 5
 
 
 def test_patch_item_returns_404_when_not_owned(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    update_stub.error = CartItemNotFoundError()
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    stubs.update.error = CartItemNotFoundError()
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.patch(f'/api/v1/cart/items/{uuid4()}', json={'quantity': 2})
 
@@ -314,32 +375,66 @@ def test_patch_item_returns_404_when_not_owned(stubs):
     assert response.json()['code'] == 'NOT_FOUND'
 
 
-def test_delete_item_returns_204(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
-    item_id = uuid4()
+def test_patch_item_returns_409_on_insufficient_stock(stubs):
+    stubs.update.error = InsufficientStockError()
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
-    response = client.delete(f'/api/v1/cart/items/{item_id}')
+    response = client.patch(f'/api/v1/cart/items/{uuid4()}', json={'quantity': 100})
 
-    assert response.status_code == 204
-    assert response.text == ''
-    assert remove_stub.calls[0][0] == item_id
+    assert response.status_code == 409
+    assert response.json()['code'] == 'INSUFFICIENT_STOCK'
+
+
+def test_delete_item_returns_200_cart(stubs):
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
+    sku_id = uuid4()
+
+    response = client.delete(f'/api/v1/cart/items/{sku_id}')
+
+    # Per openapi spec: DELETE returns the full updated cart (200), not 204.
+    assert response.status_code == 200
+    body = response.json()
+    assert 'items' in body
+    assert stubs.remove.calls[0][0] == sku_id
 
 
 def test_delete_item_returns_404_for_foreign(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    remove_stub.error = CartItemNotFoundError()
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    stubs.remove.error = CartItemNotFoundError()
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.delete(f'/api/v1/cart/items/{uuid4()}')
 
     assert response.status_code == 404
 
 
+def test_validate_cart_returns_200(stubs):
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
+
+    response = client.post('/api/v1/cart/validate')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert 'is_valid' in body
+    assert 'cart' in body
+    assert 'issues' in body
+    assert stubs.validate.calls == [(user.id, None)]
+
+
+def test_validate_cart_requires_identity(stubs):
+    client = TestClient(_make_app(stubs, user=None))
+
+    response = client.post('/api/v1/cart/validate')
+
+    assert response.status_code == 400
+    assert response.json()['code'] == 'MISSING_CART_IDENTITY'
+
+
 def test_merge_cart_requires_jwt(stubs):
-    client = TestClient(_make_app(*stubs, user=None))
+    client = TestClient(_make_app(stubs, user=None))
 
     response = client.post('/api/v1/cart/merge', headers={'X-Session-Id': str(uuid4())})
 
@@ -349,8 +444,8 @@ def test_merge_cart_requires_jwt(stubs):
 
 
 def test_merge_cart_requires_session_id(stubs):
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
-    client = TestClient(_make_app(*stubs, user=user))
+    user = _buyer()
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.post('/api/v1/cart/merge')
 
@@ -359,32 +454,40 @@ def test_merge_cart_requires_session_id(stubs):
 
 
 def test_merge_cart_returns_200(stubs):
-    add_stub, update_stub, remove_stub, get_stub, merge_stub = stubs
-    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+    user = _buyer()
     session_id = str(uuid4())
-    client = TestClient(_make_app(*stubs, user=user))
+    client = TestClient(_make_app(stubs, user=user))
 
     response = client.post('/api/v1/cart/merge', headers={'X-Session-Id': session_id})
 
     assert response.status_code == 200
-    assert merge_stub.calls == [(user.id, session_id)]
+    assert stubs.merge.calls == [(user.id, session_id)]
     # Возвращаем уже обновлённую корзину
-    assert get_stub.calls == [(user.id, None)]
+    assert stubs.get.calls == [(user.id, None)]
 
 
 def test_response_model_contract():
-    """Sanity check для контракта response — поля и их типы."""
-    response = CartItemResponseSchema(
-        id=uuid4(),
+    """Sanity check для контракта response — поля и их типы (OpenAPI CartItem)."""
+    item = CartItemResponseSchema(
         sku_id=uuid4(),
+        product_id=uuid4(),
+        name='Nike 42',
         quantity=2,
-        title='X',
         unit_price=100,
-        available_quantity=10,
         line_total=200,
-        unavailable_reason=None,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
+        available_quantity=10,
+        is_available=True,
     )
-    assert response.unavailable_reason is None
-    assert response.line_total == 200
+    assert item.is_available is True
+    assert item.line_total == 200
+    assert item.unavailable_reason is None
+    assert item.sku_code is None
+
+    cart = CartResponseSchema(items=[item], items_count=2, subtotal=200, is_valid=True)
+    dumped = cart.model_dump()
+    # Поля, которые spec убрал, отсутствуют
+    assert 'total_amount' not in dumped
+    assert 'user_id' not in dumped
+    assert 'session_id' not in dumped
+    # Поля, которые spec требует, присутствуют
+    assert {'items', 'items_count', 'subtotal', 'is_valid'} <= dumped.keys()

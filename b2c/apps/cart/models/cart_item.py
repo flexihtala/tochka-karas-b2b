@@ -29,6 +29,7 @@ class CartItem(IDMixin, TimestampMixin, Base):
         nullable=False,
     )
     sku_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
 
     def __init__(
@@ -37,10 +38,12 @@ class CartItem(IDMixin, TimestampMixin, Base):
         id: uuid.UUID | None = None,
         cart_id: uuid.UUID,
         sku_id: uuid.UUID,
+        product_id: uuid.UUID | None = None,
         quantity: int,
     ):
         if id is not None:
             self.id = id
         self.cart_id = cart_id
         self.sku_id = sku_id
+        self.product_id = product_id
         self.quantity = quantity

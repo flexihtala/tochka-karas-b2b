@@ -1,118 +1,117 @@
-"""Тесты интеграции с B2B через ServiceClient + httpx.MockTransport.
+"""Интеграция с B2B через РЕАЛЬНЫЙ ServiceClient + httpx.MockTransport.
 
-Не дёргаем сеть — используем httpx.MockTransport чтобы убедиться:
-- GET /api/v1/skus?ids=... формируется корректно
-- ServiceClient прокидывает X-Service-Key заголовок
-- payload разбирается в обогащённую корзину
+Мокается только транспорт (httpx), весь остальной код ServiceClient (заголовки,
+разбор JSON, ServiceClientError) выполняется как в проде. Проверяем:
+- POST /api/v1/public/products/batch формируется корректно (path + body product_ids).
+- ServiceClient прокидывает X-Service-Key.
+- payload-массив разбирается в обогащённую корзину.
+- B2B недоступен (5xx) → B2BUnavailableError (503).
 """
 
+import json as json_lib
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import httpx
 import pytest
 
 from apps.cart.enums import UnavailableReason
-from apps.cart.schemas.db import CartItemCreateSchema
+from apps.cart.errors import B2BUnavailableError
+from apps.cart.schemas.db import CartCreateSchema, CartItemCreateSchema
 from apps.cart.use_cases import GetCartUseCase
 from shared.http_clients import ServiceClient
-from tests.cart.fakes import FakeCartItemRepository, FakeCartRepository
-
-
-class _ServiceClientWithTransport(ServiceClient):
-    """ServiceClient с httpx.MockTransport вместо реального HTTP."""
-
-    def __init__(self, transport: httpx.MockTransport, service_key: str = 'test-key'):
-        super().__init__(base_url='http://b2b.test', service_key=service_key, timeout=5.0)
-        self.transport = transport
-
-    async def _request(  # type: ignore[override]
-        self,
-        method: str,
-        path: str,
-        *,
-        json: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
-        idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
-        url = f'{self.base_url}{path}'
-        headers = {'X-Service-Key': self.service_key}
-        if idempotency_key:
-            headers['Idempotency-Key'] = idempotency_key
-
-        async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout) as client:
-            response = await client.request(method, url, json=json, params=params, headers=headers)
-
-        if response.status_code >= 400:
-            raise RuntimeError(f'{method} {path}: {response.status_code}')
-        if not response.content:
-            return {}
-        return response.json()  # type: ignore[no-any-return]
+from tests.cart.fakes import FakeCartItemRepository, FakeCartRepository, make_product, make_sku
 
 
 @pytest.mark.anyio
-async def test_get_cart_calls_b2b_skus_endpoint_with_service_key():
+async def test_get_cart_calls_b2b_batch_endpoint_with_service_key():
     cart_repo = FakeCartRepository()
     item_repo = FakeCartItemRepository()
     user_id = uuid4()
     sku_id = uuid4()
-    cart = await cart_repo.create(_cart_create_schema(user_id=user_id))
-    await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, quantity=2))
+    product_id = uuid4()
+    cart = await cart_repo.create(CartCreateSchema(user_id=user_id))
+    await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, product_id=product_id, quantity=2))
 
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        captured['method'] = request.method
         captured['path'] = request.url.path
-        captured['query'] = dict(request.url.params)
         captured['service_key'] = request.headers.get('X-Service-Key')
+        captured['body'] = json_lib.loads(request.content)
         return httpx.Response(
             200,
-            json={
-                'items': [
-                    {'id': str(sku_id), 'title': 'Foo', 'price': 250, 'available_quantity': 7},
-                ],
-            },
+            json=[
+                make_product(
+                    product_id=product_id,
+                    title='Foo',
+                    skus=[make_sku(sku_id=sku_id, product_id=product_id, name='S', price=250, active_quantity=7)],
+                )
+            ],
         )
 
-    client = _ServiceClientWithTransport(httpx.MockTransport(handler), service_key='secret-key')
+    client = ServiceClient(
+        base_url='http://b2b.test',
+        service_key='secret-key',
+        transport=httpx.MockTransport(handler),
+    )
     use_case = GetCartUseCase(cart_repository=cart_repo, cart_item_repository=item_repo, b2b_client=client)
 
     result = await use_case(user_id=user_id, session_id=None)
 
-    assert captured['path'] == '/api/v1/skus'
-    assert captured['query'] == {'ids': str(sku_id)}
+    assert captured['method'] == 'POST'
+    assert captured['path'] == '/api/v1/public/products/batch'
     assert captured['service_key'] == 'secret-key'
+    assert captured['body'] == {'product_ids': [str(product_id)]}
 
     assert len(result.items) == 1
-    assert result.items[0].title == 'Foo'
+    assert result.items[0].name == 'Foo S'
+    assert result.items[0].unit_price == 250
     assert result.items[0].line_total == 500  # 250 * 2
-    assert result.total_amount == 500
+    assert result.subtotal == 500
+    assert result.is_valid is True
 
 
 @pytest.mark.anyio
-async def test_get_cart_missing_sku_in_b2b_response_marks_as_deleted():
+async def test_get_cart_missing_product_in_b2b_response_marks_as_deleted():
     cart_repo = FakeCartRepository()
     item_repo = FakeCartItemRepository()
     user_id = uuid4()
     sku_id = uuid4()
-    cart = await cart_repo.create(_cart_create_schema(user_id=user_id))
-    await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, quantity=3))
+    product_id = uuid4()
+    cart = await cart_repo.create(CartCreateSchema(user_id=user_id))
+    await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=sku_id, product_id=product_id, quantity=3))
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={'items': []})  # B2B ничего не вернул
+        return httpx.Response(200, json=[])  # B2B ничего не вернул (товар скрыт/удалён)
 
-    client = _ServiceClientWithTransport(httpx.MockTransport(handler))
+    client = ServiceClient(base_url='http://b2b.test', service_key='k', transport=httpx.MockTransport(handler))
     use_case = GetCartUseCase(cart_repository=cart_repo, cart_item_repository=item_repo, b2b_client=client)
 
     result = await use_case(user_id=user_id, session_id=None)
 
     assert len(result.items) == 1
-    assert result.items[0].unavailable_reason == UnavailableReason.DELETED
+    assert result.items[0].is_available is False
+    assert result.items[0].unavailable_reason == UnavailableReason.PRODUCT_DELETED
     assert result.items[0].line_total == 0
-    assert result.total_amount == 0
+    assert result.subtotal == 0
+    assert result.is_valid is False
 
 
-def _cart_create_schema(user_id: UUID | None = None, session_id: str | None = None):
-    from apps.cart.schemas.db import CartCreateSchema
+@pytest.mark.anyio
+async def test_get_cart_raises_503_when_b2b_unavailable():
+    cart_repo = FakeCartRepository()
+    item_repo = FakeCartItemRepository()
+    user_id = uuid4()
+    cart = await cart_repo.create(CartCreateSchema(user_id=user_id))
+    await item_repo.create(CartItemCreateSchema(cart_id=cart.id, sku_id=uuid4(), product_id=uuid4(), quantity=1))
 
-    return CartCreateSchema(user_id=user_id, session_id=session_id)
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={'code': 'DOWN'})
+
+    client = ServiceClient(base_url='http://b2b.test', service_key='k', transport=httpx.MockTransport(handler))
+    use_case = GetCartUseCase(cart_repository=cart_repo, cart_item_repository=item_repo, b2b_client=client)
+
+    with pytest.raises(B2BUnavailableError):
+        await use_case(user_id=user_id, session_id=None)

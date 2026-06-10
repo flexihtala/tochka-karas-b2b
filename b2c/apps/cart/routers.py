@@ -7,13 +7,15 @@ from fastapi import APIRouter, Header, Request, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.cart.errors import GuestSessionRequiredError, MissingCartIdentityError
 from apps.cart.schemas.request import CartItemAddRequestSchema, CartItemUpdateRequestSchema
-from apps.cart.schemas.response import CartItemResponseSchema, CartResponseSchema
+from apps.cart.schemas.response import CartResponseSchema, CartValidationResponseSchema
 from apps.cart.use_cases import (
     AddItemUseCase,
+    ClearCartUseCase,
     GetCartUseCase,
     MergeCartUseCase,
     RemoveItemUseCase,
     UpdateItemUseCase,
+    ValidateCartUseCase,
 )
 from shared.auth_lib import UserRole
 
@@ -24,6 +26,8 @@ error_responses = {
     400: {'model': ErrorResponseSchema},
     401: {'model': ErrorResponseSchema},
     404: {'model': ErrorResponseSchema},
+    409: {'model': ErrorResponseSchema},
+    503: {'model': ErrorResponseSchema},
 }
 
 
@@ -54,6 +58,19 @@ async def get_cart(
     return await use_case(user_id=user_id, session_id=session_id)
 
 
+@router.delete('', status_code=status.HTTP_204_NO_CONTENT, responses=error_responses)
+@inject
+async def clear_cart(
+    request: Request,
+    use_case: FromDishka[ClearCartUseCase],
+    x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
+) -> Response:
+    """DELETE /api/v1/cart — очистить корзину целиком (204)."""
+    user_id, session_id = _identity(request, x_session_id)
+    await use_case(user_id=user_id, session_id=session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post('/items', response_model=CartResponseSchema, responses=error_responses)
 @inject
 async def add_item(
@@ -70,37 +87,53 @@ async def add_item(
     return await get_use_case(user_id=user_id, session_id=session_id)
 
 
-@router.patch('/items/{item_id}', response_model=CartItemResponseSchema, responses=error_responses)
+@router.patch('/items/{sku_id}', response_model=CartResponseSchema, responses=error_responses)
 @inject
 async def update_item(
     request: Request,
-    item_id: UUID,
+    sku_id: UUID,
     data: CartItemUpdateRequestSchema,
     use_case: FromDishka[UpdateItemUseCase],
+    get_use_case: FromDishka[GetCartUseCase],
     x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
-) -> CartItemResponseSchema:
+) -> CartResponseSchema:
+    """PATCH /api/v1/cart/items/{sku_id} — изменить quantity.
+
+    Per openapi spec: path-параметр sku_id, ответ — обновлённая корзина целиком.
+    """
     user_id, session_id = _identity(request, x_session_id)
-    item = await use_case(item_id, data, user_id=user_id, session_id=session_id)
-    return CartItemResponseSchema(
-        id=item.id,
-        sku_id=item.sku_id,
-        quantity=item.quantity,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-    )
+    await use_case(sku_id, data, user_id=user_id, session_id=session_id)
+    return await get_use_case(user_id=user_id, session_id=session_id)
 
 
-@router.delete('/items/{item_id}', status_code=status.HTTP_204_NO_CONTENT, responses=error_responses)
+@router.delete('/items/{sku_id}', response_model=CartResponseSchema, responses=error_responses)
 @inject
 async def delete_item(
     request: Request,
-    item_id: UUID,
+    sku_id: UUID,
     use_case: FromDishka[RemoveItemUseCase],
+    get_use_case: FromDishka[GetCartUseCase],
     x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
-) -> Response:
+) -> CartResponseSchema:
+    """DELETE /api/v1/cart/items/{sku_id} — удалить позицию.
+
+    Per openapi spec: path-параметр sku_id, ответ 200 с обновлённой корзиной.
+    """
     user_id, session_id = _identity(request, x_session_id)
-    await use_case(item_id, user_id=user_id, session_id=session_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    await use_case(sku_id, user_id=user_id, session_id=session_id)
+    return await get_use_case(user_id=user_id, session_id=session_id)
+
+
+@router.post('/validate', response_model=CartValidationResponseSchema, responses=error_responses)
+@inject
+async def validate_cart(
+    request: Request,
+    use_case: FromDishka[ValidateCartUseCase],
+    x_session_id: str | None = Header(default=None, alias='X-Session-Id'),
+) -> CartValidationResponseSchema:
+    """POST /api/v1/cart/validate — проверка корзины перед чекаутом."""
+    user_id, session_id = _identity(request, x_session_id)
+    return await use_case(user_id=user_id, session_id=session_id)
 
 
 @router.post('/merge', response_model=CartResponseSchema, responses=error_responses)

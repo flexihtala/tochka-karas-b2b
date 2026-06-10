@@ -1,0 +1,2 @@
+from .banner_click_repository import BannerClickRepository as BannerClickRepository
+from .banner_repository import BannerRepository as BannerRepository

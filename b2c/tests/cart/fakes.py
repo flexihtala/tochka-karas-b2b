@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from apps.cart.schemas.db import (
@@ -9,6 +10,94 @@ from apps.cart.schemas.db import (
     CartReadSchema,
     CartUpdateSchema,
 )
+from shared.http_clients import ServiceClientError
+
+
+def make_sku(
+    *,
+    sku_id: UUID,
+    product_id: UUID,
+    name: str = 'M',
+    price: int = 1000,
+    active_quantity: int = 10,
+    article: str | None = None,
+    images: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Реально-витринная форма SKUPublic (без cost_price/reserved_quantity)."""
+    return {
+        'id': str(sku_id),
+        'product_id': str(product_id),
+        'name': name,
+        'price': price,
+        'discount': 0,
+        'stock_quantity': active_quantity,
+        'active_quantity': active_quantity,
+        'article': article,
+        'images': images or [],
+        'characteristics': [],
+    }
+
+
+def make_product(
+    *,
+    product_id: UUID,
+    title: str = 'Product',
+    skus: list[dict[str, Any]] | None = None,
+    images: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Реально-витринная форма ProductPublicResponse с вложенными skus."""
+    return {
+        'id': str(product_id),
+        'seller_id': str(uuid4()),
+        'category_id': str(uuid4()),
+        'title': title,
+        'slug': title.lower().replace(' ', '-'),
+        'description': '',
+        'status': 'MODERATED',
+        'images': images or [],
+        'characteristics': [],
+        'skus': skus or [],
+        'created_at': '2026-06-05T00:00:00Z',
+        'updated_at': '2026-06-05T00:00:00Z',
+    }
+
+
+class FakeB2BClient:
+    """Тонкий фейк ServiceClient: НЕ мокает бизнес-логику, только HTTP-границу.
+
+    - get('/api/v1/public/skus/{id}') → single SKU dict, либо 404 ServiceClientError.
+    - post('/api/v1/public/products/batch', json={'product_ids': [...]}) → JSON-массив
+      видимых товаров (только запрошенные id, что присутствуют в self.products).
+    """
+
+    def __init__(
+        self,
+        products: list[dict[str, Any]] | None = None,
+        skus: dict[UUID, dict[str, Any]] | None = None,
+    ):
+        self.products_by_id: dict[str, dict[str, Any]] = {p['id']: p for p in (products or [])}
+        self.skus_by_id: dict[str, dict[str, Any]] = {str(k): v for k, v in (skus or {}).items()}
+        self.get_calls: list[str] = []
+        self.post_calls: list[tuple[str, dict[str, Any] | None]] = []
+
+    async def get(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.get_calls.append(path)
+        sku_id = path.rsplit('/', 1)[-1]
+        sku = self.skus_by_id.get(sku_id)
+        if sku is None:
+            raise ServiceClientError(status_code=404, message='not found', payload={'code': 'NOT_FOUND'})
+        return sku
+
+    async def post(
+        self,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self.post_calls.append((path, json))
+        requested = (json or {}).get('product_ids', [])
+        return [self.products_by_id[pid] for pid in requested if pid in self.products_by_id]
 
 
 class FakeCartRepository:
@@ -79,6 +168,7 @@ class FakeCartItemRepository:
         self.created: list[CartItemCreateSchema] = []
         self.updated: list[dict] = []
         self.deleted: list[UUID] = []
+        self.deleted_by_cart: list[UUID] = []
 
     async def create(self, data: CartItemCreateSchema) -> CartItemReadSchema:
         self.created.append(data)
@@ -88,6 +178,7 @@ class FakeCartItemRepository:
             id=item_id,
             cart_id=data.cart_id,
             sku_id=data.sku_id,
+            product_id=data.product_id,
             quantity=data.quantity,
             created_at=now,
             updated_at=now,
@@ -126,6 +217,12 @@ class FakeCartItemRepository:
             if item.cart_id == cart_id and item.sku_id == sku_id:
                 return item
         return None
+
+    async def delete_by_cart(self, cart_id: UUID) -> None:
+        self.deleted_by_cart.append(cart_id)
+        targets = [iid for iid, i in self.by_id.items() if i.cart_id == cart_id]
+        for iid in targets:
+            self.by_id.pop(iid, None)
 
     def add(self, item: CartItemReadSchema) -> None:
         self.by_id[item.id] = item

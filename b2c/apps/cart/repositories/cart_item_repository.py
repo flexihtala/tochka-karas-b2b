@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from apps.cart.models import CartItem
 from apps.cart.schemas.db import (
@@ -27,3 +27,10 @@ class CartItemRepository(DBCrudRepository[CartItem, CartItemCreateSchema, CartIt
             model = (await session.execute(query)).scalar_one_or_none()
 
         return self.model_validate(model) if model else None
+
+    async def delete_by_cart(self, cart_id: UUID) -> None:
+        """Удалить все позиции корзины (DELETE /api/v1/cart — очистка)."""
+        query = delete(CartItem).where(CartItem.cart_id == cart_id)
+
+        async with self.session_manager.get_session() as session:
+            await session.execute(query)

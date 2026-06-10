@@ -3,10 +3,12 @@ from dishka import Provider, Scope, provide
 from apps.cart.repositories import CartItemRepository, CartRepository
 from apps.cart.use_cases import (
     AddItemUseCase,
+    ClearCartUseCase,
     GetCartUseCase,
     MergeCartUseCase,
     RemoveItemUseCase,
     UpdateItemUseCase,
+    ValidateCartUseCase,
 )
 from settings import B2CSettings
 from shared.http_clients import ServiceClient
@@ -21,6 +23,8 @@ class CartProvider(Provider):
     remove_item_use_case = provide(RemoveItemUseCase, scope=Scope.REQUEST)
     get_cart_use_case = provide(GetCartUseCase, scope=Scope.REQUEST)
     merge_cart_use_case = provide(MergeCartUseCase, scope=Scope.REQUEST)
+    clear_cart_use_case = provide(ClearCartUseCase, scope=Scope.REQUEST)
+    validate_cart_use_case = provide(ValidateCartUseCase, scope=Scope.REQUEST)
 
     @provide(scope=Scope.APP)
     def get_b2b_service_client(self, settings: B2CSettings) -> ServiceClient:

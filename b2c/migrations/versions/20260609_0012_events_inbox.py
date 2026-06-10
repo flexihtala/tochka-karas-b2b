@@ -1,8 +1,8 @@
 """create events / inbox tables: processed_events, sku_unavailability
 
-Revision ID: 20260520_0003
-Revises: 20260520_0002
-Create Date: 2026-05-20
+Revision ID: 20260609_0012
+Revises: 20260609_0011
+Create Date: 2026-06-10
 """
 
 from typing import Sequence
@@ -10,8 +10,8 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = '20260520_0003'
-down_revision: str | None = '20260520_0002'
+revision: str = '20260609_0012'
+down_revision: str | None = '20260609_0011'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
