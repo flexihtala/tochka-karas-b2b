@@ -25,6 +25,7 @@ error_responses = {
     400: {'model': ErrorResponseSchema},
     401: {'model': ErrorResponseSchema},
     404: {'model': ErrorResponseSchema},
+    409: {'model': ErrorResponseSchema},
 }
 
 
@@ -43,8 +44,9 @@ async def receive_b2b_event(
     """POST /api/v1/b2b/events — приём событий о товарах от B2B-сервиса.
 
     Авторизация: X-Service-Key (направление b2b_to_mod).
-    Идемпотентность обеспечивается естественным no-op поведением на терминальных
-    (HARD_BLOCKED) и архивных тикетах; полноценный processed_events-inbox — follow-up.
+    Идемпотентность: idempotency_key фиксируется в processed_events
+    (UNIQUE(sender_service, idempotency_key)) ДО мутаций тикетов; повтор события
+    с тем же ключом (TTL 24h) → 409 DUPLICATE_EVENT без побочных эффектов.
 
     - PRODUCT_CREATED → новый тикет (PENDING).
     - PRODUCT_EDITED  → сброс активного тикета в PENDING; HARD_BLOCKED игнорируется.

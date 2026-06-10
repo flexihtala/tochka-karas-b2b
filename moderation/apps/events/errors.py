@@ -1,8 +1,23 @@
+from uuid import UUID
+
 from apps.errors import AppError
 
 
 class EventError(AppError):
     pass
+
+
+class DuplicateEventError(EventError):
+    """409 — событие с таким idempotency_key уже обработано (или обрабатывается).
+
+    Спека: идемпотентность по idempotency_key (TTL 24h), дубликат → 409 без
+    каких-либо побочных эффектов. Ключ фиксируется в processed_events ДО мутаций
+    тикетов (UNIQUE(sender_service, idempotency_key) — арбитр гонки), поэтому
+    повтор/out-of-order ретрай не может создать второй тикет.
+    """
+
+    def __init__(self, idempotency_key: UUID):
+        super().__init__('DUPLICATE_EVENT', f'Событие с idempotency_key={idempotency_key} уже обработано', 409)
 
 
 class TicketNotFoundForEditError(EventError):

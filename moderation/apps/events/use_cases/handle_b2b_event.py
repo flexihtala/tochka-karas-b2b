@@ -3,6 +3,14 @@
 ADR: обработка событий B2B напрямую дёргает TicketRepository — без отдельного
 TicketService. Поведение тривиально (PENDING/ARCHIVED + терминальная защита).
 
+Идемпотентность (US-MOD-01): idempotency_key фиксируется в processed_events
+ПЕРВЫМ шагом, до любых мутаций тикетов. UNIQUE(sender_service, idempotency_key)
+— арбитр гонки: повторная/конкурентная доставка ловит IntegrityError →
+DuplicateEventError (409 DUPLICATE_EVENT) без побочных эффектов. Это закрывает
+и out-of-order ретраи (DELETED раньше CREATED): повтор любого события с тем же
+ключом отбрасывается. shared.inbox.IdempotentHandler здесь не подходит — он
+переигрывает cached-ответ (202), а спека moderation требует 409 на дубликат.
+
 Логика согласно спеке `neomarket-moderation.yaml` (IncomingB2BEvent.event_type)
 и канону moderation-flows.md#hard-block («Необратимость»):
 - PRODUCT_CREATED: создать ticket(kind=CREATE, status=PENDING) с json_after из payload.
@@ -15,19 +23,27 @@ TicketService. Поведение тривиально (PENDING/ARCHIVED + те�
                    Идемпотентно (повторный delete — no-op).
 """
 
-from apps.events.errors import TicketNotFoundForEditError, UnsupportedEventTypeError
+from uuid import UUID
+
+from sqlalchemy.exc import IntegrityError
+
+from apps.events.errors import DuplicateEventError, TicketNotFoundForEditError, UnsupportedEventTypeError
 from apps.events.schemas.request import B2BEventTypeEnum, IncomingB2BEventSchema
 from apps.events.schemas.response import EventAcceptedResponseSchema
+from apps.inbox.repositories import InboxRepository
 from apps.tickets.enums import TicketKind, TicketStatus
 from apps.tickets.repositories import TicketRepository
 from apps.tickets.schemas.db import TicketCreateSchema, TicketUpdateSchema
+from shared.types import ServiceName
 
 
 class HandleB2BEventUseCase:
-    def __init__(self, ticket_repository: TicketRepository):
+    def __init__(self, ticket_repository: TicketRepository, inbox_repository: InboxRepository):
         self.ticket_repository = ticket_repository
+        self.inbox_repository = inbox_repository
 
     async def __call__(self, event: IncomingB2BEventSchema) -> EventAcceptedResponseSchema:
+        await self._record_idempotency_key(event.idempotency_key)
         match event.event_type:
             case B2BEventTypeEnum.PRODUCT_CREATED:
                 return await self._on_created(event)
@@ -38,6 +54,17 @@ class HandleB2BEventUseCase:
             case _:
                 # Pydantic уже отфильтрует, но защитим use-case.
                 raise UnsupportedEventTypeError(str(event.event_type))
+
+    async def _record_idempotency_key(self, idempotency_key: UUID) -> None:
+        """INSERT ключа в processed_events ДО мутаций тикетов.
+
+        IntegrityError по UNIQUE(sender_service, idempotency_key) означает, что
+        событие уже обработано (или обрабатывается конкурентно) → 409 без эффектов.
+        """
+        try:
+            await self.inbox_repository.insert(ServiceName.B2B, idempotency_key)
+        except IntegrityError as exc:
+            raise DuplicateEventError(idempotency_key) from exc
 
     async def _on_created(self, event: IncomingB2BEventSchema) -> EventAcceptedResponseSchema:
         seller_id = event.payload.seller_id
