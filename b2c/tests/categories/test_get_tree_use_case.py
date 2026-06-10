@@ -38,15 +38,47 @@ async def test_category_tree_returns_nested_structure():
 
     electronics_node = result.items[0]
     assert electronics_node.parent_id is None
+    assert electronics_node.level == 0
+    assert electronics_node.path == ['Электроника']
     assert [c.slug for c in electronics_node.children] == ['phones', 'laptops']
 
     phones_node = electronics_node.children[0]
     assert phones_node.parent_id == electronics.id
+    assert phones_node.level == 1
+    assert phones_node.path == ['Электроника', 'Смартфоны']
     assert [c.slug for c in phones_node.children] == ['android']
     assert phones_node.children[0].children == []
 
     clothes_node = result.items[1]
     assert clothes_node.children == []
+    assert clothes_node.level == 0
+    assert clothes_node.path == ['Одежда']
+
+
+@pytest.mark.anyio
+async def test_tree_nodes_have_level_and_path():
+    """level: корень = 0, +1 на уровень; path: имена от корня включая текущую."""
+    repo = FakeCategoryRepository()
+    root = make_category(name='Электроника', slug='electronics')
+    child = make_category(name='Смартфоны', slug='phones', parent_id=root.id)
+    grandchild = make_category(name='Android', slug='android', parent_id=child.id)
+    for category in (root, child, grandchild):
+        repo.add(category)
+
+    use_case = GetTreeUseCase(category_repository=repo)
+    result = await use_case()
+
+    root_node = result.items[0]
+    assert root_node.level == 0
+    assert root_node.path == ['Электроника']
+
+    child_node = root_node.children[0]
+    assert child_node.level == 1
+    assert child_node.path == ['Электроника', 'Смартфоны']
+
+    grandchild_node = child_node.children[0]
+    assert grandchild_node.level == 2
+    assert grandchild_node.path == ['Электроника', 'Смартфоны', 'Android']
 
 
 @pytest.mark.anyio

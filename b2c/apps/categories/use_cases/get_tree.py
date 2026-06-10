@@ -17,6 +17,9 @@ class GetTreeUseCase:
     4. Если в БД есть категория с parent_id, на который никто не ссылается
        (orphan), бросаем 422 — иначе клиент получит обрезанное дерево
        без явного сигнала об ошибке.
+
+    Попутно каждому узлу проставляются level (корень = 0, +1 на уровень
+    вложенности) и path (имена категорий от корня до текущей включительно).
     """
 
     def __init__(self, category_repository: CategoryRepository):
@@ -39,17 +42,27 @@ class GetTreeUseCase:
             if category.parent_id is not None and category.parent_id not in all_ids:
                 raise OrphanCategoryNodeError()
 
-        def build_subtree(parent_id: UUID | None) -> list[CategoryTreeNodeSchema]:
+        def build_node(node: CategoryReadSchema, level: int, parent_path: list[str]) -> CategoryTreeNodeSchema:
+            path = [*parent_path, node.name]
+            return CategoryTreeNodeSchema(
+                id=node.id,
+                name=node.name,
+                slug=node.slug,
+                parent_id=node.parent_id,
+                ordering=node.ordering,
+                level=level,
+                path=path,
+                children=build_subtree(node.id, level + 1, path),
+            )
+
+        def build_subtree(
+            parent_id: UUID | None,
+            level: int,
+            parent_path: list[str],
+        ) -> list[CategoryTreeNodeSchema]:
             return [
-                CategoryTreeNodeSchema(
-                    id=node.id,
-                    name=node.name,
-                    slug=node.slug,
-                    parent_id=node.parent_id,
-                    ordering=node.ordering,
-                    children=build_subtree(node.id),
-                )
+                build_node(node, level, parent_path)
                 for node in sorted(by_parent.get(parent_id, []), key=lambda c: (c.ordering, c.name))
             ]
 
-        return build_subtree(None)
+        return build_subtree(None, 0, [])

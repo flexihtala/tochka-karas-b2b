@@ -21,7 +21,12 @@ class CategoryResponseSchema(BaseModel):
 
 
 class CategoryTreeNodeSchema(BaseModel):
-    """Узел дерева категорий: GET /api/v1/categories/tree."""
+    """Узел дерева категорий: GET /api/v1/categories/tree.
+
+    level и path вычисляются при сборке дерева (в БД не хранятся):
+    level — глубина узла (корень = 0), path — имена категорий от корня
+    до текущей включительно, например ['Электроника', 'Смартфоны'].
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,7 +35,24 @@ class CategoryTreeNodeSchema(BaseModel):
     slug: str
     parent_id: UUID | None
     ordering: int
+    level: int
+    path: list[str]
     children: list['CategoryTreeNodeSchema'] = Field(default_factory=list)
+
+
+class CategoryRefSchema(BaseModel):
+    """Ссылка на категорию (b2c/openapi.yaml#CategoryRef): GET /api/v1/catalog/categories.
+
+    Контракт CategoryRef: required [id, name, level, path].
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    parent_id: UUID | None = None
+    level: int
+    path: list[str]
 
 
 class CategoryTreeResponseSchema(BaseModel):

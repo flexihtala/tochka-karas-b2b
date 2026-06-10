@@ -17,11 +17,17 @@ from apps.categories.routers import router as categories_router
 from apps.categories.schemas.response import (
     BreadcrumbsResponseSchema,
     CategoryBreadcrumbNodeSchema,
+    CategoryRefSchema,
     CategoryResponseSchema,
     CategoryTreeNodeSchema,
     CategoryTreeResponseSchema,
 )
-from apps.categories.use_cases import GetBreadcrumbsUseCase, GetCategoryUseCase, GetTreeUseCase
+from apps.categories.use_cases import (
+    GetBreadcrumbsUseCase,
+    GetCategoryUseCase,
+    GetFlatCategoriesUseCase,
+    GetTreeUseCase,
+)
 from apps.errors import setup_error_handlers
 
 
@@ -45,6 +51,19 @@ class StubGetTreeUseCase:
         self.response = CategoryTreeResponseSchema(items=[])
 
     async def __call__(self) -> CategoryTreeResponseSchema:
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.response
+
+
+class StubGetFlatCategoriesUseCase:
+    def __init__(self):
+        self.calls: int = 0
+        self.error: Exception | None = None
+        self.response: list[CategoryRefSchema] = []
+
+    async def __call__(self) -> list[CategoryRefSchema]:
         self.calls += 1
         if self.error:
             raise self.error
@@ -104,11 +123,13 @@ class CategoriesRouteProvider(Provider):
         tree_stub: StubGetTreeUseCase,
         category_stub: StubGetCategoryUseCase,
         breadcrumbs_stub: StubGetBreadcrumbsUseCase,
+        flat_stub: StubGetFlatCategoriesUseCase,
     ):
         super().__init__()
         self.tree_stub = tree_stub
         self.category_stub = category_stub
         self.breadcrumbs_stub = breadcrumbs_stub
+        self.flat_stub = flat_stub
 
     @provide(scope=Scope.REQUEST)
     def get_tree_use_case(self) -> GetTreeUseCase:
@@ -122,6 +143,10 @@ class CategoriesRouteProvider(Provider):
     def get_breadcrumbs_use_case(self) -> GetBreadcrumbsUseCase:
         return self.breadcrumbs_stub
 
+    @provide(scope=Scope.REQUEST)
+    def get_flat_categories_use_case(self) -> GetFlatCategoriesUseCase:
+        return self.flat_stub
+
 
 @pytest.fixture
 def stubs():
@@ -129,25 +154,26 @@ def stubs():
         StubGetTreeUseCase(),
         StubGetCategoryUseCase(),
         StubGetBreadcrumbsUseCase(),
+        StubGetFlatCategoriesUseCase(),
     )
 
 
 @pytest.fixture
 def client(stubs):
-    tree_stub, category_stub, breadcrumbs_stub = stubs
+    tree_stub, category_stub, breadcrumbs_stub, flat_stub = stubs
     app = FastAPI()
     app.include_router(categories_router, prefix='/api/v1')
     setup_error_handlers(app)
     container = make_async_container(
         FastapiProvider(),
-        CategoriesRouteProvider(tree_stub, category_stub, breadcrumbs_stub),
+        CategoriesRouteProvider(tree_stub, category_stub, breadcrumbs_stub, flat_stub),
     )
     setup_dishka(container, app)
     return TestClient(app)
 
 
 def test_get_tree_returns_200(client, stubs):
-    tree_stub, _, _ = stubs
+    tree_stub, _, _, _ = stubs
     root_id = uuid4()
     child_id = uuid4()
     tree_stub.response = CategoryTreeResponseSchema(
@@ -158,6 +184,8 @@ def test_get_tree_returns_200(client, stubs):
                 slug='electronics',
                 parent_id=None,
                 ordering=0,
+                level=0,
+                path=['Электроника'],
                 children=[
                     CategoryTreeNodeSchema(
                         id=child_id,
@@ -165,6 +193,8 @@ def test_get_tree_returns_200(client, stubs):
                         slug='phones',
                         parent_id=root_id,
                         ordering=0,
+                        level=1,
+                        path=['Электроника', 'Смартфоны'],
                         children=[],
                     )
                 ],
@@ -180,12 +210,16 @@ def test_get_tree_returns_200(client, stubs):
     assert isinstance(body, list)
     assert len(body) == 1
     assert body[0]['slug'] == 'electronics'
+    assert body[0]['level'] == 0
+    assert body[0]['path'] == ['Электроника']
     assert body[0]['children'][0]['slug'] == 'phones'
+    assert body[0]['children'][0]['level'] == 1
+    assert body[0]['children'][0]['path'] == ['Электроника', 'Смартфоны']
     assert tree_stub.calls == 1
 
 
 def test_get_tree_orphan_returns_422(client, stubs):
-    tree_stub, _, _ = stubs
+    tree_stub, _, _, _ = stubs
     tree_stub.error = OrphanCategoryNodeError()
 
     response = client.get('/api/v1/catalog/categories/tree')
@@ -197,8 +231,64 @@ def test_get_tree_orphan_returns_422(client, stubs):
     }
 
 
+def test_get_flat_categories_returns_200(client, stubs):
+    """GET '' (плоский список): 200, у каждого элемента id/name/parent_id/level/path."""
+    _, _, _, flat_stub = stubs
+    root_id = uuid4()
+    child_id = uuid4()
+    flat_stub.response = [
+        CategoryRefSchema(
+            id=root_id,
+            name='Электроника',
+            parent_id=None,
+            level=0,
+            path=['Электроника'],
+        ),
+        CategoryRefSchema(
+            id=child_id,
+            name='Смартфоны',
+            parent_id=root_id,
+            level=1,
+            path=['Электроника', 'Смартфоны'],
+        ),
+    ]
+
+    response = client.get('/api/v1/catalog/categories')
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert len(body) == 2
+    for item in body:
+        assert set(item) >= {'id', 'name', 'parent_id', 'level', 'path'}
+    assert body[0] == {
+        'id': str(root_id),
+        'name': 'Электроника',
+        'parent_id': None,
+        'level': 0,
+        'path': ['Электроника'],
+    }
+    assert body[1]['parent_id'] == str(root_id)
+    assert body[1]['level'] == 1
+    assert body[1]['path'] == ['Электроника', 'Смартфоны']
+    assert flat_stub.calls == 1
+
+
+def test_get_flat_categories_orphan_returns_422(client, stubs):
+    _, _, _, flat_stub = stubs
+    flat_stub.error = OrphanCategoryNodeError()
+
+    response = client.get('/api/v1/catalog/categories')
+
+    assert response.status_code == 422
+    assert response.json() == {
+        'code': 'orphan_node',
+        'message': 'Иерархия категорий нарушена',
+    }
+
+
 def test_get_category_returns_200(client, stubs):
-    _, category_stub, _ = stubs
+    _, category_stub, _, _ = stubs
     category_id = uuid4()
 
     response = client.get(f'/api/v1/catalog/categories/{category_id}')
@@ -211,7 +301,7 @@ def test_get_category_returns_200(client, stubs):
 
 
 def test_get_category_returns_404_for_missing(client, stubs):
-    _, category_stub, _ = stubs
+    _, category_stub, _, _ = stubs
     category_stub.error = CategoryNotFoundError()
 
     response = client.get(f'/api/v1/catalog/categories/{uuid4()}')
@@ -221,7 +311,7 @@ def test_get_category_returns_404_for_missing(client, stubs):
 
 
 def test_breadcrumbs_with_category_id_returns_200(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     category_id = uuid4()
 
     response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={category_id}')
@@ -234,7 +324,7 @@ def test_breadcrumbs_with_category_id_returns_200(client, stubs):
 
 
 def test_breadcrumbs_with_product_id_returns_200(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     product_id = uuid4()
 
     response = client.get(f'/api/v1/catalog/categories/breadcrumbs?product_id={product_id}')
@@ -246,7 +336,7 @@ def test_breadcrumbs_with_product_id_returns_200(client, stubs):
 
 
 def test_breadcrumbs_ambiguous_returns_400(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     breadcrumbs_stub.error = AmbiguousBreadcrumbsParamsError()
 
     response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}&product_id={uuid4()}')
@@ -256,7 +346,7 @@ def test_breadcrumbs_ambiguous_returns_400(client, stubs):
 
 
 def test_breadcrumbs_missing_returns_400(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     breadcrumbs_stub.error = MissingBreadcrumbsParamsError()
 
     response = client.get('/api/v1/catalog/categories/breadcrumbs')
@@ -266,7 +356,7 @@ def test_breadcrumbs_missing_returns_400(client, stubs):
 
 
 def test_breadcrumbs_orphan_returns_422(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     breadcrumbs_stub.error = OrphanCategoryNodeError()
 
     response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}')
@@ -276,7 +366,7 @@ def test_breadcrumbs_orphan_returns_422(client, stubs):
 
 
 def test_breadcrumbs_unknown_category_returns_404(client, stubs):
-    _, _, breadcrumbs_stub = stubs
+    _, _, breadcrumbs_stub, _ = stubs
     breadcrumbs_stub.error = CategoryNotFoundError()
 
     response = client.get(f'/api/v1/catalog/categories/breadcrumbs?category_id={uuid4()}')
