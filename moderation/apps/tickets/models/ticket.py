@@ -56,6 +56,9 @@ class Ticket(IDMixin, TimestampMixin, Base):
         nullable=True,
     )
     moderator_comment: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # Замечания по полям (канон product_moderation_field_report) — JSON-массив на тикете.
+    # NOT NULL: «нет замечаний» — это [], не NULL (очищать тоже значением []).
+    field_reports: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default='[]')
     json_before: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     json_after: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default='{}')
 
@@ -75,6 +78,7 @@ class Ticket(IDMixin, TimestampMixin, Base):
         decision_at: datetime | None = None,
         blocking_reason_id: uuid.UUID | None = None,
         moderator_comment: str | None = None,
+        field_reports: list[dict[str, Any]] | None = None,
         json_before: dict[str, Any] | None = None,
         json_after: dict[str, Any] | None = None,
     ):
@@ -92,5 +96,6 @@ class Ticket(IDMixin, TimestampMixin, Base):
         self.decision_at = decision_at
         self.blocking_reason_id = blocking_reason_id
         self.moderator_comment = moderator_comment
+        self.field_reports = field_reports if field_reports is not None else []
         self.json_before = json_before
         self.json_after = json_after if json_after is not None else {}

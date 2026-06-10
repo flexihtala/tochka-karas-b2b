@@ -1,68 +1,99 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from apps.favorites.schemas.request import AddFavoriteRequestSchema
+from apps.favorites.errors import B2BUnavailableError, ProductNotFoundError
 from apps.favorites.use_cases import AddFavoriteUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
-from tests.favorites.fakes import FakeFavoriteRepository
+from shared.http_clients import ServiceClientError
+from tests.favorites.fakes import FakeB2BProductsClient, FakeFavoriteRepository
 
 
 def _user() -> AuthenticatedUserSchema:
     return AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
 
 
+def _use_case(repo: FakeFavoriteRepository, b2b: FakeB2BProductsClient) -> AddFavoriteUseCase:
+    return AddFavoriteUseCase(favorite_repository=repo, b2b_products_client=b2b)  # type: ignore[arg-type]
+
+
+def _known_product(b2b: FakeB2BProductsClient) -> UUID:
+    product_id = uuid4()
+    b2b.add_product(product_id, title='Cool')
+    return product_id
+
+
 @pytest.mark.anyio
-async def test_add_to_favorites_returns_201():
-    """DoD: первое добавление товара даёт created=True (роутер маппит на 201)."""
+async def test_add_creates_favorite_and_returns_none():
+    """Первое добавление: одна запись в БД, use-case ничего не возвращает (роутер → 204)."""
     user = _user()
     repo = FakeFavoriteRepository()
-    use_case = AddFavoriteUseCase(favorite_repository=repo)
-    product_id = uuid4()
+    b2b = FakeB2BProductsClient()
+    product_id = _known_product(b2b)
 
-    result = await use_case(AddFavoriteRequestSchema(product_id=product_id), user)
+    result = await _use_case(repo, b2b)(product_id, user)
 
-    assert result.created is True
-    assert result.favorite.user_id == user.id
-    assert result.favorite.product_id == product_id
+    assert result is None
     assert len(repo.created) == 1
     assert repo.created[0].user_id == user.id
     assert repo.created[0].product_id == product_id
 
 
 @pytest.mark.anyio
-async def test_repeat_add_returns_200_not_duplicate():
-    """DoD: повторное добавление того же (user_id, product_id) не создаёт дубль
-    и возвращает created=False (роутер маппит на 200).
-    """
+async def test_repeat_add_is_idempotent_no_duplicate():
+    """Повторное добавление того же (user_id, product_id) не создаёт дубль (роутер → 204)."""
     user = _user()
     repo = FakeFavoriteRepository()
-    use_case = AddFavoriteUseCase(favorite_repository=repo)
-    product_id = uuid4()
+    b2b = FakeB2BProductsClient()
+    product_id = _known_product(b2b)
+    use_case = _use_case(repo, b2b)
 
-    first = await use_case(AddFavoriteRequestSchema(product_id=product_id), user)
-    second = await use_case(AddFavoriteRequestSchema(product_id=product_id), user)
+    first = await use_case(product_id, user)
+    second = await use_case(product_id, user)
 
-    assert first.created is True
-    assert second.created is False
-    assert second.favorite.id == first.favorite.id
+    assert first is None
+    assert second is None
     assert len(repo.created) == 1, 'второй вызов не должен делать INSERT'
+    assert len(repo.by_id) == 1
 
 
 @pytest.mark.anyio
-async def test_add_uses_jwt_user_id_ignoring_request_extras():
-    """user_id берётся только из JWT — даже если клиент пытается передать чужой."""
+async def test_add_unknown_product_raises_not_found():
+    """Неизвестный товар (B2B его не вернул) → ProductNotFoundError (404)."""
     user = _user()
     repo = FakeFavoriteRepository()
-    use_case = AddFavoriteUseCase(favorite_repository=repo)
-    product_id = uuid4()
+    b2b = FakeB2BProductsClient()  # пустой B2B — товара нет
 
-    # extra='ignore' — лишний user_id из тела не попадёт в схему
-    request = AddFavoriteRequestSchema.model_validate({'product_id': str(product_id), 'user_id': str(uuid4())})
+    with pytest.raises(ProductNotFoundError):
+        await _use_case(repo, b2b)(uuid4(), user)
 
-    result = await use_case(request, user)
+    assert repo.created == []
 
-    assert result.favorite.user_id == user.id
+
+@pytest.mark.anyio
+async def test_add_b2b_unavailable_raises_503():
+    """PUT не деградирует: если B2B недоступен, проверка товара отвечает 503."""
+    user = _user()
+    repo = FakeFavoriteRepository()
+    b2b = FakeB2BProductsClient()
+    b2b.error = ServiceClientError(status_code=503, message='GET /api/v1/products failed')
+
+    with pytest.raises(B2BUnavailableError):
+        await _use_case(repo, b2b)(uuid4(), user)
+
+    assert repo.created == []
+
+
+@pytest.mark.anyio
+async def test_add_uses_jwt_user_id():
+    """user_id берётся только из JWT (current_user) — защита от IDOR."""
+    user = _user()
+    repo = FakeFavoriteRepository()
+    b2b = FakeB2BProductsClient()
+    product_id = _known_product(b2b)
+
+    await _use_case(repo, b2b)(product_id, user)
+
     assert repo.created[0].user_id == user.id
 
 
@@ -72,12 +103,12 @@ async def test_add_separates_favorites_per_user():
     user_a = _user()
     user_b = _user()
     repo = FakeFavoriteRepository()
-    use_case = AddFavoriteUseCase(favorite_repository=repo)
-    product_id = uuid4()
+    b2b = FakeB2BProductsClient()
+    product_id = _known_product(b2b)
+    use_case = _use_case(repo, b2b)
 
-    res_a = await use_case(AddFavoriteRequestSchema(product_id=product_id), user_a)
-    res_b = await use_case(AddFavoriteRequestSchema(product_id=product_id), user_b)
+    await use_case(product_id, user_a)
+    await use_case(product_id, user_b)
 
-    assert res_a.created is True
-    assert res_b.created is True
-    assert res_a.favorite.id != res_b.favorite.id
+    assert len(repo.created) == 2
+    assert {item.user_id for item in repo.created} == {user_a.id, user_b.id}

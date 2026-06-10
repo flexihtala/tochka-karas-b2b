@@ -6,6 +6,7 @@ from .buyers.routers import router as buyers_router
 from .cart.routers import router as cart_router
 from .catalog.routers import router as catalog_router
 from .categories.routers import router as categories_router
+from .events.routers import router as events_router
 from .favorites.routers import router as favorites_router
 from .home.routers import router as home_router
 from .orders.routers import router as orders_router
@@ -25,3 +26,4 @@ router.include_router(categories_router)
 router.include_router(favorites_router)
 router.include_router(subscriptions_router)
 router.include_router(home_router)
+router.include_router(events_router)

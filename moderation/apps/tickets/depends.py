@@ -5,6 +5,7 @@ from apps.tickets.repositories import TicketRepository
 from apps.tickets.use_cases import (
     ApproveTicketUseCase,
     BlockTicketUseCase,
+    DeclineProductUseCase,
     ReleaseTicketUseCase,
 )
 from settings import ModerationSettings
@@ -17,6 +18,7 @@ class TicketsProvider(Provider):
     release_ticket_use_case = provide(ReleaseTicketUseCase, scope=Scope.REQUEST)
     approve_ticket_use_case = provide(ApproveTicketUseCase, scope=Scope.REQUEST)
     block_ticket_use_case = provide(BlockTicketUseCase, scope=Scope.REQUEST)
+    decline_product_use_case = provide(DeclineProductUseCase, scope=Scope.REQUEST)
 
     @provide(scope=Scope.APP)
     def get_b2b_service_client(self, settings: ModerationSettings) -> ServiceClient:

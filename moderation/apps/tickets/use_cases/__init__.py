@@ -1,3 +1,4 @@
 from .approve_ticket import ApproveTicketUseCase as ApproveTicketUseCase
 from .block_ticket import BlockTicketUseCase as BlockTicketUseCase
+from .decline_product import DeclineProductUseCase as DeclineProductUseCase
 from .release_ticket import ReleaseTicketUseCase as ReleaseTicketUseCase
