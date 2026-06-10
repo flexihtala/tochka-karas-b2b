@@ -3,7 +3,7 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Request, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
-from apps.home.schemas import BannerClickRequestSchema, BannerResponseSchema
+from apps.home.schemas import BannerClickRequestSchema, BannerListResponseSchema
 from apps.home.use_cases import ClickBannerUseCase, ListBannersUseCase
 from shared.auth_lib import AuthenticatedUserSchema
 
@@ -16,13 +16,13 @@ error_responses = {
 
 
 @router.get(
-    '/catalog/banners',
-    response_model=list[BannerResponseSchema],
+    '/home/banners',
+    response_model=BannerListResponseSchema,
     responses=error_responses,
 )
 @inject
-async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> list[BannerResponseSchema]:
-    """GET /api/v1/catalog/banners — active banners per openapi spec."""
+async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> BannerListResponseSchema:
+    """GET /api/v1/home/banners — публичный список активных баннеров (канон B2C-14)."""
     return await use_case()
 
 
