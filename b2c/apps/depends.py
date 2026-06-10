@@ -7,6 +7,7 @@ from apps.cart.depends import CartProvider
 from apps.catalog.depends import CatalogProvider
 from apps.categories.depends import CategoriesProvider
 from apps.favorites.depends import FavoritesProvider
+from apps.home.depends import HomeProvider
 from apps.orders.depends import OrdersProvider
 from apps.payment_methods.depends import PaymentMethodsProvider
 from apps.subscriptions.depends import SubscriptionsProvider
@@ -36,4 +37,5 @@ providers = [
     CategoriesProvider(),
     FavoritesProvider(),
     SubscriptionsProvider(),
+    HomeProvider(),
 ]
