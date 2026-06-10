@@ -19,33 +19,52 @@ from apps.orders.schemas.response import (
     OrderListResponseSchema,
     OrderResponseSchema,
 )
+from apps.addresses.schemas.response import AddressResponseSchema
 from apps.orders.use_cases import CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
 
+def _make_address(buyer_id: UUID) -> AddressResponseSchema:
+    now = datetime.now(UTC)
+    return AddressResponseSchema(
+        id=uuid4(),
+        buyer_id=buyer_id,
+        country='RU',
+        city='Екатеринбург',
+        street='Мира 19',
+        postal_code='620000',
+        comment=None,
+        is_default=True,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 def _make_order(order_id: UUID | None = None) -> OrderResponseSchema:
     now = datetime.now(UTC)
+    buyer_id = uuid4()
     return OrderResponseSchema(
         id=order_id or uuid4(),
+        buyer_id=buyer_id,
         status='PAID',
         items=[
             OrderItemResponseSchema(
-                id=uuid4(),
                 sku_id=uuid4(),
                 product_id=uuid4(),
-                product_title='Phone',
-                sku_name='128GB',
+                name='Phone 128GB',
                 quantity=1,
                 unit_price=10_000,
                 line_total=10_000,
             ),
         ],
-        total_amount=10_000,
-        delivery_address=None,
-        address_id=None,
-        payment_method_id=None,
+        subtotal=10_000,
+        total=10_000,
+        address=_make_address(buyer_id),
+        payment_method=None,
+        comment=None,
+        cancel_reason=None,
         created_at=now,
-        updated_at=now,
+        paid_at=now,
     )
 
 
@@ -133,11 +152,11 @@ def test_list_orders_returns_200(stubs):
         items=[
             OrderListItemResponseSchema(
                 id=uuid4(),
+                buyer_id=uuid4(),
                 status='PAID',
-                total_amount=10_000,
+                total=10_000,
                 items_count=1,
                 created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
             )
         ],
         total_count=1,
