@@ -37,14 +37,40 @@ class TicketTerminalError(TicketError):
 
 
 class TicketNotOwnerError(TicketError):
-    """403 — approve чужой карточки.
+    """403 — approve/block чужой карточки.
 
     Отдельная ошибка от TicketNotAssignedError (409): канон approve-product (шаг 5)
-    и DoD US-MOD-03 требуют для approve именно 403, тогда как спека block/release — 409.
+    и канон MOD-4 soft-block (шаг 5, «Если moderator_id != текущий модератор → 403
+    Forbidden (Not assigned to you)») требуют именно 403. Release остаётся на 409
+    (TicketNotAssignedError) по спеке moderation.yaml.
     """
 
     def __init__(self, message: str = 'Эта карточка модерации закреплена за другим модератором'):
         super().__init__('TICKET_NOT_OWNER', message, 403)
+
+
+class UnknownBlockingReasonError(TicketError):
+    """400 — причина блокировки не найдена или неактивна (block-путь).
+
+    Канон MOD-4 (шаг 7): «Если не найдена → 400 Bad Request (Blocking reason not found)».
+    Отдельная от BlockingReasonNotFoundError (404 в CRUD справочника причин): в block-пути
+    blocking_reason_id приходит в ТЕЛЕ запроса, поэтому неизвестный ID — некорректный
+    запрос (400), а не отсутствие ресурса по URL (404).
+    """
+
+    def __init__(self, message: str = 'Blocking reason not found'):
+        super().__init__('BLOCKING_REASON_NOT_FOUND', message, 400)
+
+
+class InvalidFieldNameError(TicketError):
+    """400 — field_reports[].field_name вне допустимого enum (канон MOD-4).
+
+    Допустимые значения (apps.tickets.enums.FieldReportName): title, description,
+    product_images, category, sku_name, sku_image, sku_price.
+    """
+
+    def __init__(self, message: str = 'Недопустимое значение field_name в field_reports'):
+        super().__init__('INVALID_FIELD_NAME', message, 400)
 
 
 class TicketNoSkusError(TicketError):
