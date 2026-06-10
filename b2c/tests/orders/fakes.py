@@ -104,6 +104,24 @@ class FakeOrderRepository:
         self.by_idempotency_key[order.idempotency_key] = order.id
         self.items_by_order[order.id] = items
 
+    async def list_for_user(
+        self,
+        user_id: UUID,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[OrderReadSchema], int]:
+        """Мирроринг OrderRepository.list_for_user: created_at DESC, ?status, (items, total)."""
+        own = [o for o in self.by_id.values() if o.user_id == user_id]
+        if status is not None:
+            own = [o for o in own if o.status == status]
+        own.sort(key=lambda o: o.created_at, reverse=True)
+        return own[offset : offset + limit], len(own)
+
+    async def items_count_map(self, order_ids: list[UUID]) -> dict[UUID, int]:
+        return {oid: len(self.items_by_order.get(oid, [])) for oid in order_ids}
+
 
 class FakeOrderItemRepository:
     def __init__(self, parent: FakeOrderRepository):
