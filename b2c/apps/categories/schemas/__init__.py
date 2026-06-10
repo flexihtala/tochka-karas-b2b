@@ -3,6 +3,7 @@ from .db import CategoryReadSchema as CategoryReadSchema
 from .db import CategoryUpdateSchema as CategoryUpdateSchema
 from .response import BreadcrumbsResponseSchema as BreadcrumbsResponseSchema
 from .response import CategoryBreadcrumbNodeSchema as CategoryBreadcrumbNodeSchema
+from .response import CategoryRefSchema as CategoryRefSchema
 from .response import CategoryResponseSchema as CategoryResponseSchema
 from .response import CategoryTreeNodeSchema as CategoryTreeNodeSchema
 from .response import CategoryTreeResponseSchema as CategoryTreeResponseSchema
