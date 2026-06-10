@@ -22,6 +22,7 @@ def make_ticket(
     decision_at: datetime | None = None,
     blocking_reason_id: UUID | None = None,
     moderator_comment: str | None = None,
+    field_reports: list[dict[str, Any]] | None = None,
     json_before: dict[str, Any] | None = None,
     json_after: dict[str, Any] | None = None,
 ) -> TicketReadSchema:
@@ -40,6 +41,7 @@ def make_ticket(
         decision_at=decision_at,
         blocking_reason_id=blocking_reason_id,
         moderator_comment=moderator_comment,
+        field_reports=field_reports if field_reports is not None else [],
         json_before=json_before,
         json_after=json_after or {},
         created_at=now,
@@ -80,6 +82,7 @@ class FakeTicketRepository:
             decision_at=data.decision_at,
             blocking_reason_id=data.blocking_reason_id,
             moderator_comment=data.moderator_comment,
+            field_reports=data.field_reports,
             json_before=data.json_before,
             json_after=data.json_after,
         )

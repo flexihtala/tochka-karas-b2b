@@ -40,3 +40,12 @@ class TicketListResponseSchema(BaseModel):
     total_count: int
     limit: int
     offset: int
+
+
+class DeclineProductResponseSchema(BaseModel):
+    """Канонный ответ MOD-4/MOD-5 (POST /api/v1/products/{product_id}/decline):
+    {product_id, status} — BLOCKED для soft, HARD_BLOCKED для hard причины.
+    """
+
+    product_id: UUID
+    status: TicketStatus

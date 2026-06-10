@@ -14,7 +14,13 @@ from .request import (
     BlockTicketRequestSchema as BlockTicketRequestSchema,
 )
 from .request import (
+    DeclineProductRequestSchema as DeclineProductRequestSchema,
+)
+from .request import (
     FieldReportSchema as FieldReportSchema,
+)
+from .response import (
+    DeclineProductResponseSchema as DeclineProductResponseSchema,
 )
 from .response import (
     TicketListResponseSchema as TicketListResponseSchema,

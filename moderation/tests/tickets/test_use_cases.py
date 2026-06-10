@@ -2,19 +2,25 @@ from uuid import uuid4
 
 import pytest
 
-from apps.blocking_reasons.errors import BlockingReasonNotFoundError
 from apps.tickets.enums import TicketStatus
 from apps.tickets.errors import (
+    InvalidFieldNameError,
     TicketNoSkusError,
     TicketNotAssignedError,
     TicketNotFoundError,
     TicketNotOwnerError,
     TicketTerminalError,
     TicketWrongStatusError,
+    UnknownBlockingReasonError,
 )
-from apps.tickets.schemas.request import BlockTicketRequestSchema, FieldReportSchema
+from apps.tickets.schemas.request import (
+    BlockTicketRequestSchema,
+    DeclineProductRequestSchema,
+    FieldReportSchema,
+)
 from apps.tickets.use_cases.approve_ticket import ApproveTicketUseCase
 from apps.tickets.use_cases.block_ticket import BlockTicketUseCase
+from apps.tickets.use_cases.decline_product import DeclineProductUseCase
 from apps.tickets.use_cases.release_ticket import ReleaseTicketUseCase
 from shared.auth_lib import UserRole
 from tests.blocking_reasons.fakes import FakeBlockingReasonRepository, make_blocking_reason
@@ -264,8 +270,9 @@ async def test_block_soft_emits_event_with_hard_block_false():
     assert event.payload['hard_block'] is False
     assert event.payload['blocking_reason_ids'] == [str(soft_reason.id)]
     assert event.payload['comment'] == 'Описание не соответствует'
+    # Legacy-форма (field_path/message) принимается и нормализуется: message → comment.
     assert event.payload['field_reports'] == [
-        {'field_path': 'description', 'message': 'Скопировано', 'severity': 'ERROR'}
+        {'field_name': None, 'field_path': 'description', 'sku_id': None, 'comment': 'Скопировано'}
     ]
 
 
@@ -307,7 +314,8 @@ async def test_block_hard_emits_hard_blocked_event_and_status():
 
 
 @pytest.mark.anyio
-async def test_block_404_when_reason_not_found():
+async def test_block_unknown_reason_returns_400():
+    """Канон MOD-4 (шаг 7): неизвестная blocking_reason_id → 400 Bad Request (не 404)."""
     repo = FakeTicketRepository()
     moderator_id = uuid4()
     ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
@@ -319,13 +327,15 @@ async def test_block_404_when_reason_not_found():
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(BlockingReasonNotFoundError):
+    with pytest.raises(UnknownBlockingReasonError) as err:
         await use_case(
             ticket.id,
             BlockTicketRequestSchema(blocking_reason_ids=[uuid4()], comment='x'),
             moderator_id,
             UserRole.MODERATOR,
         )
+
+    assert err.value.status_code == 400
 
 
 @pytest.mark.anyio
@@ -344,7 +354,7 @@ async def test_block_rejects_inactive_reason():
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(BlockingReasonNotFoundError):
+    with pytest.raises(UnknownBlockingReasonError) as err:
         await use_case(
             ticket.id,
             BlockTicketRequestSchema(blocking_reason_ids=[inactive_reason.id], comment='x'),
@@ -352,9 +362,13 @@ async def test_block_rejects_inactive_reason():
             UserRole.MODERATOR,
         )
 
+    assert err.value.status_code == 400
+
 
 @pytest.mark.anyio
 async def test_block_rejects_when_not_owner_and_not_admin():
+    """Канон MOD-4 (шаг 5): чужая карточка → 403 (TicketNotOwnerError), как в approve.
+    Release остаётся на 409 (TicketNotAssignedError) по спеке."""
     repo = FakeTicketRepository()
     reasons = FakeBlockingReasonRepository()
     owner_id = uuid4()
@@ -370,13 +384,15 @@ async def test_block_rejects_when_not_owner_and_not_admin():
         session_manager=FakeSessionManager(),
     )
 
-    with pytest.raises(TicketNotAssignedError):
+    with pytest.raises(TicketNotOwnerError) as err:
         await use_case(
             ticket.id,
             BlockTicketRequestSchema(blocking_reason_ids=[reason.id], comment='x'),
             other_moderator,
             UserRole.MODERATOR,
         )
+
+    assert err.value.status_code == 403
 
 
 @pytest.mark.anyio
@@ -410,6 +426,289 @@ async def test_block_multiple_reasons_any_hard_makes_hard_blocked():
 
     assert result.status == TicketStatus.HARD_BLOCKED
     assert outbox.enqueued[0].payload['blocking_reason_ids'] == [str(soft.id), str(hard.id)]
+
+
+# --------------------- US-MOD-04: SOFT BLOCK (canon) ---------------------
+
+
+def _make_block_use_case(repo, reasons, outbox):
+    return BlockTicketUseCase(
+        ticket_repository=repo,
+        blocking_reason_repository=reasons,
+        outbox_repository=outbox,
+        session_manager=FakeSessionManager(),
+    )
+
+
+@pytest.mark.anyio
+async def test_soft_block_transitions_to_blocked_with_field_reports():
+    """DoD US-MOD-04: IN_REVIEW → BLOCKED; канонные field_reports (field_name из enum,
+    sku_id, comment) персистятся на тикете и ПОЛНОСТЬЮ заменяют старые замечания."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+    sku_id = uuid4()
+
+    soft_reason = make_blocking_reason(title='Несоответствие описания', hard_block=False)
+    reasons.add(soft_reason)
+    # На тикете уже есть старое замечание — повторный block должен заменить список целиком.
+    ticket = make_ticket(
+        status=TicketStatus.IN_REVIEW,
+        claimed_by=moderator_id,
+        field_reports=[{'field_name': 'title', 'field_path': None, 'sku_id': None, 'comment': 'Старое'}],
+    )
+    repo.add(ticket)
+    use_case = _make_block_use_case(repo, reasons, outbox)
+
+    result = await use_case(
+        ticket.id,
+        BlockTicketRequestSchema(
+            blocking_reason_ids=[soft_reason.id],
+            comment='Описание и фото не соответствуют товару',
+            field_reports=[
+                FieldReportSchema(field_name='description', comment='Текст скопирован'),
+                FieldReportSchema(field_name='sku_price', sku_id=sku_id, comment='Цена подозрительная'),
+            ],
+        ),
+        moderator_id,
+        UserRole.MODERATOR,
+    )
+
+    assert result.status == TicketStatus.BLOCKED
+    persisted = repo.by_id[ticket.id]
+    assert persisted.status == TicketStatus.BLOCKED
+    assert persisted.blocking_reason_id == soft_reason.id
+    # Старое замечание удалено, новые сохранены в каноническом виде.
+    assert persisted.field_reports == [
+        {'field_name': 'description', 'field_path': None, 'sku_id': None, 'comment': 'Текст скопирован'},
+        {'field_name': 'sku_price', 'field_path': None, 'sku_id': str(sku_id), 'comment': 'Цена подозрительная'},
+    ]
+
+
+@pytest.mark.anyio
+async def test_soft_block_emits_event_to_b2b():
+    """DoD US-MOD-04: outbox-событие event_type='BLOCKED' для b2b, payload hard_block=false,
+    field_reports включены в payload в каноническом виде."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+
+    soft_reason = make_blocking_reason(title='Soft', hard_block=False)
+    reasons.add(soft_reason)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = _make_block_use_case(repo, reasons, outbox)
+
+    await use_case(
+        ticket.id,
+        BlockTicketRequestSchema(
+            blocking_reason_ids=[soft_reason.id],
+            comment='Описание не соответствует',
+            field_reports=[FieldReportSchema(field_name='description', comment='Скопировано')],
+        ),
+        moderator_id,
+        UserRole.MODERATOR,
+    )
+
+    assert len(outbox.enqueued) == 1
+    event = outbox.enqueued[0]
+    assert event.event_type == 'BLOCKED'
+    assert event.target_service.value == 'b2b'
+    assert event.payload['hard_block'] is False
+    assert event.payload['product_id'] == str(ticket.product_id)
+    assert event.payload['field_reports'] == [
+        {'field_name': 'description', 'field_path': None, 'sku_id': None, 'comment': 'Скопировано'},
+    ]
+
+
+@pytest.mark.anyio
+async def test_soft_block_unknown_reason_returns_400():
+    """DoD US-MOD-04 (канон, шаг 7): неизвестная blocking_reason_id → 400 Bad Request.
+    Статус тикета не меняется, outbox пуст."""
+    repo = FakeTicketRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = _make_block_use_case(repo, FakeBlockingReasonRepository(), outbox)
+
+    with pytest.raises(UnknownBlockingReasonError) as err:
+        await use_case(
+            ticket.id,
+            BlockTicketRequestSchema(blocking_reason_ids=[uuid4()], comment='x'),
+            moderator_id,
+            UserRole.MODERATOR,
+        )
+
+    assert err.value.status_code == 400
+    assert err.value.code == 'BLOCKING_REASON_NOT_FOUND'
+    assert repo.by_id[ticket.id].status == TicketStatus.IN_REVIEW
+    assert outbox.enqueued == []
+
+
+@pytest.mark.anyio
+async def test_soft_block_others_card_returns_403():
+    """DoD US-MOD-04 (канон, шаг 5): карточка закреплена за ДРУГИМ модератором → 403
+    Forbidden (TicketNotOwnerError), не 409. Outbox пуст, статус не меняется."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    owner_id = uuid4()
+    other_moderator = uuid4()
+
+    soft_reason = make_blocking_reason(hard_block=False)
+    reasons.add(soft_reason)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=owner_id)
+    repo.add(ticket)
+    use_case = _make_block_use_case(repo, reasons, outbox)
+
+    with pytest.raises(TicketNotOwnerError) as err:
+        await use_case(
+            ticket.id,
+            BlockTicketRequestSchema(blocking_reason_ids=[soft_reason.id], comment='x'),
+            other_moderator,
+            UserRole.MODERATOR,
+        )
+
+    assert err.value.status_code == 403
+    assert err.value.code == 'TICKET_NOT_OWNER'
+    assert repo.by_id[ticket.id].status == TicketStatus.IN_REVIEW
+    assert outbox.enqueued == []
+
+
+@pytest.mark.anyio
+async def test_soft_block_invalid_field_name_returns_400():
+    """DoD US-MOD-04: field_name вне enum (title, description, product_images, category,
+    sku_name, sku_image, sku_price) → 400 INVALID_FIELD_NAME. Тикет не меняется, outbox пуст."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+
+    soft_reason = make_blocking_reason(hard_block=False)
+    reasons.add(soft_reason)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = _make_block_use_case(repo, reasons, outbox)
+
+    with pytest.raises(InvalidFieldNameError) as err:
+        await use_case(
+            ticket.id,
+            BlockTicketRequestSchema(
+                blocking_reason_ids=[soft_reason.id],
+                comment='x',
+                field_reports=[FieldReportSchema(field_name='price', comment='не из enum')],
+            ),
+            moderator_id,
+            UserRole.MODERATOR,
+        )
+
+    assert err.value.status_code == 400
+    assert err.value.code == 'INVALID_FIELD_NAME'
+    assert repo.by_id[ticket.id].status == TicketStatus.IN_REVIEW
+    assert outbox.enqueued == []
+
+
+# ----------------- US-MOD-04: канонный alias /products/{id}/decline -----------------
+
+
+@pytest.mark.anyio
+async def test_decline_soft_blocks_ticket_by_product_id():
+    """Канонный alias MOD-4: тикет находится по product_id, одна blocking_reason_id
+    оборачивается в список, статус → BLOCKED, ответ — {product_id, status}."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+
+    soft_reason = make_blocking_reason(title='Описание не соответствует', hard_block=False)
+    reasons.add(soft_reason)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = DeclineProductUseCase(
+        ticket_repository=repo,
+        block_ticket_use_case=_make_block_use_case(repo, reasons, outbox),
+    )
+
+    result = await use_case(
+        ticket.product_id,
+        DeclineProductRequestSchema(
+            blocking_reason_id=soft_reason.id,
+            moderator_comment='Описание и фото не соответствуют товару',
+            field_reports=[FieldReportSchema(field_name='description', comment='Скопировано')],
+        ),
+        moderator_id,
+        UserRole.MODERATOR,
+    )
+
+    # Канонный ответ MOD-4: {product_id, status: BLOCKED}.
+    assert result.product_id == ticket.product_id
+    assert result.status == TicketStatus.BLOCKED
+    persisted = repo.by_id[ticket.id]
+    assert persisted.status == TicketStatus.BLOCKED
+    assert persisted.moderator_comment == 'Описание и фото не соответствуют товару'
+    assert persisted.field_reports == [
+        {'field_name': 'description', 'field_path': None, 'sku_id': None, 'comment': 'Скопировано'},
+    ]
+    assert len(outbox.enqueued) == 1
+    assert outbox.enqueued[0].event_type == 'BLOCKED'
+    assert outbox.enqueued[0].payload['hard_block'] is False
+
+
+@pytest.mark.anyio
+async def test_decline_unknown_product_returns_404():
+    """Канон MOD-4 (шаг 2): запись по product_id не найдена → 404. Outbox пуст."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    soft_reason = make_blocking_reason(hard_block=False)
+    reasons.add(soft_reason)
+    use_case = DeclineProductUseCase(
+        ticket_repository=repo,
+        block_ticket_use_case=_make_block_use_case(repo, reasons, outbox),
+    )
+
+    with pytest.raises(TicketNotFoundError) as err:
+        await use_case(
+            uuid4(),
+            DeclineProductRequestSchema(blocking_reason_id=soft_reason.id, moderator_comment='x'),
+            uuid4(),
+            UserRole.MODERATOR,
+        )
+
+    assert err.value.status_code == 404
+    assert outbox.enqueued == []
+
+
+@pytest.mark.anyio
+async def test_decline_hard_reason_routes_to_hard_block():
+    """ADR: причина с hard_block=true на канонном soft-пути НЕ отклоняется с 400, а
+    маршрутизируется в hard-block (Flow MOD-5) — статус HARD_BLOCKED, hard_block=true."""
+    repo = FakeTicketRepository()
+    reasons = FakeBlockingReasonRepository()
+    outbox = FakeOutboxRepository()
+    moderator_id = uuid4()
+
+    hard_reason = make_blocking_reason(title='Контрафактный товар', hard_block=True)
+    reasons.add(hard_reason)
+    ticket = make_ticket(status=TicketStatus.IN_REVIEW, claimed_by=moderator_id)
+    repo.add(ticket)
+    use_case = DeclineProductUseCase(
+        ticket_repository=repo,
+        block_ticket_use_case=_make_block_use_case(repo, reasons, outbox),
+    )
+
+    result = await use_case(
+        ticket.product_id,
+        DeclineProductRequestSchema(blocking_reason_id=hard_reason.id, moderator_comment='Контрафакт'),
+        moderator_id,
+        UserRole.MODERATOR,
+    )
+
+    assert result.status == TicketStatus.HARD_BLOCKED
+    assert outbox.enqueued[0].payload['hard_block'] is True
 
 
 # --------------------- US-MOD-05: HARD BLOCK (terminal) ---------------------
