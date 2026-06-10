@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from apps.blocking_reasons.errors import BlockingReasonReferencedError
 from apps.blocking_reasons.routers import router as blocking_reasons_router
 from apps.blocking_reasons.schemas.request import (
     BlockingReasonCreateRequestSchema,
@@ -243,6 +244,18 @@ def test_delete_blocking_reason_returns_204_for_admin(stubs):
 
     assert response.status_code == 204
     assert stubs.delete.calls == [target_id]
+
+
+def test_delete_blocking_reason_returns_409_when_referenced(stubs):
+    """US-MOD-06: причина, на которую ссылается тикет, не удаляется — 409 BLOCKING_REASON_REFERENCED."""
+    stubs.delete.error = BlockingReasonReferencedError()
+    user = AuthenticatedUserSchema(id=uuid4(), role=UserRole.ADMIN)
+    client = TestClient(_make_app(stubs, user))
+
+    response = client.delete(f'/api/v1/blocking-reasons/{uuid4()}')
+
+    assert response.status_code == 409
+    assert response.json()['code'] == 'BLOCKING_REASON_REFERENCED'
 
 
 # Suppress unused fixture warning
