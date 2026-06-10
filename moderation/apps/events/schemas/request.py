@@ -41,8 +41,8 @@ class B2BEventPayloadSchema(BaseModel):
 class IncomingB2BEventSchema(BaseModel):
     """Входящее событие от B2B → Moderation.
 
-    Идемпотентность гарантируется естественным no-op поведением на терминальных/
-    архивных тикетах; полноценный processed_events-inbox — follow-up.
+    Идемпотентность: idempotency_key фиксируется в processed_events до мутаций
+    тикетов; повтор с тем же ключом → 409 DUPLICATE_EVENT (см. HandleB2BEventUseCase).
     """
 
     event_type: B2BEventTypeEnum

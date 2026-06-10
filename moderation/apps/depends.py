@@ -3,6 +3,7 @@ from dishka import Provider, Scope, provide
 from apps.auth.depends import AuthProvider
 from apps.blocking_reasons.depends import BlockingReasonsProvider
 from apps.events.depends import EventsProvider
+from apps.inbox.depends import InboxProvider
 from apps.moderators.depends import ModeratorsProvider
 from apps.outbox.depends import OutboxProvider
 from apps.queue.depends import QueueProvider
@@ -29,5 +30,6 @@ providers = [
     TicketsProvider(),
     QueueProvider(),
     OutboxProvider(),
+    InboxProvider(),
     EventsProvider(),
 ]
