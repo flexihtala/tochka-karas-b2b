@@ -6,8 +6,13 @@ from sqlalchemy import pool
 from alembic import context
 from apps.addresses import models as addresses_models
 from apps.auth import models as auth_models
+from apps.cart import models as cart_models
+from apps.categories import models as categories_models
+from apps.favorites import models as favorites_models
+from apps.home import models as home_models
 from apps.orders import models as orders_models
 from apps.payment_methods import models as payment_methods_models
+from apps.subscriptions import models as subscriptions_models
 from shared.db import Base
 from settings import settings
 
@@ -23,7 +28,12 @@ if config.config_file_name is not None:
 auth_models
 addresses_models
 payment_methods_models
+cart_models
 orders_models
+categories_models
+favorites_models
+subscriptions_models
+home_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

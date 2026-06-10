@@ -1,0 +1,1 @@
+from .outbox_repository import ModerationOutboxRepository as ModerationOutboxRepository

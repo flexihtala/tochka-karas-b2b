@@ -1,10 +1,14 @@
-"""US-ORD-01 / US-ORD-02:
-- POST   /api/v1/orders          — checkout (US-ORD-01)
-- GET    /api/v1/orders          — list orders (US-ORD-02)
-- GET    /api/v1/orders/{id}     — order detail (US-ORD-02)
+"""US-ORD-01 / US-ORD-02 / US-ORD-03:
 
-Auth: Bearer JWT, role BUYER. user_id из JWT (никогда из body/query).
-Per spec (b2c openapi.yaml): POST /api/v1/orders requires `Idempotency-Key` header.
+- POST /api/v1/orders               — checkout (US-ORD-01, cart-based, spec OpenAPI)
+- GET  /api/v1/orders               — список заказов (US-ORD-02, paginated, ?status=)
+- GET  /api/v1/orders/{order_id}    — детали заказа (US-ORD-02, цены из снапшота)
+- POST /api/v1/orders/{order_id}/cancel — отмена (US-ORD-03)
+
+Auth: Bearer JWT, role BUYER. user_id берётся из JWT (никогда из body/query).
+`Idempotency-Key` — обязательный заголовок POST (b2c openapi.yaml). Отсутствие/невалидный
+UUID → 400 INVALID_REQUEST (RequestValidationError → validation_error_handler).
+Чужой заказ в GET /{order_id} → 404 (не 403) — IDOR-prevention по канону.
 """
 
 from uuid import UUID
@@ -14,12 +18,14 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from apps.auth.schemas import ErrorResponseSchema
+from apps.cart.schemas.response import CartValidationResponseSchema
 from apps.orders.schemas import (
-    CheckoutRequestSchema,
+    CancelRequestSchema,
+    OrderCreateRequestSchema,
     OrderListResponseSchema,
     OrderResponseSchema,
 )
-from apps.orders.use_cases import CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
+from apps.orders.use_cases import CancelOrderUseCase, CheckoutUseCase, GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole, require_role
 
 router = APIRouter(prefix='/orders')
@@ -29,9 +35,25 @@ error_responses = {
     400: {'model': ErrorResponseSchema},
     401: {'model': ErrorResponseSchema},
     403: {'model': ErrorResponseSchema},
+    409: {'model': ErrorResponseSchema},
+    422: {'model': CartValidationResponseSchema},
+    503: {'model': ErrorResponseSchema},
+}
+
+
+cancel_error_responses = {
+    401: {'model': ErrorResponseSchema},
+    403: {'model': ErrorResponseSchema},
     404: {'model': ErrorResponseSchema},
     409: {'model': ErrorResponseSchema},
     503: {'model': ErrorResponseSchema},
+}
+
+
+view_error_responses = {
+    401: {'model': ErrorResponseSchema},
+    403: {'model': ErrorResponseSchema},
+    404: {'model': ErrorResponseSchema},
 }
 
 
@@ -42,17 +64,17 @@ error_responses = {
 )
 @inject
 async def create_order(
-    data: CheckoutRequestSchema,
+    data: OrderCreateRequestSchema,
     response: Response,
     use_case: FromDishka[CheckoutUseCase],
-    idempotency_key_header: UUID | None = Header(default=None, alias='Idempotency-Key'),
+    idempotency_key: UUID = Header(alias='Idempotency-Key'),
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
 ) -> OrderResponseSchema:
-    # Spec: Idempotency-Key — header. Body-поле сохраняем для обратной совместимости,
-    # но header имеет приоритет, если передан.
-    if idempotency_key_header is not None:
-        data = data.model_copy(update={'idempotency_key': idempotency_key_header})
-    order, created = await use_case(data, current_user)
+    order, created = await use_case(
+        idempotency_key=idempotency_key,
+        data=data,
+        current_user=current_user,
+    )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return order
 
@@ -60,7 +82,7 @@ async def create_order(
 @router.get(
     '',
     response_model=OrderListResponseSchema,
-    responses=error_responses,
+    responses=view_error_responses,
 )
 @inject
 async def list_orders(
@@ -76,7 +98,7 @@ async def list_orders(
 @router.get(
     '/{order_id}',
     response_model=OrderResponseSchema,
-    responses=error_responses,
+    responses=view_error_responses,
 )
 @inject
 async def get_order(
@@ -85,3 +107,18 @@ async def get_order(
     current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
 ) -> OrderResponseSchema:
     return await use_case(order_id, current_user)
+
+
+@router.post(
+    '/{order_id}/cancel',
+    response_model=OrderResponseSchema,
+    responses=cancel_error_responses,
+)
+@inject
+async def cancel_order(
+    order_id: UUID,
+    use_case: FromDishka[CancelOrderUseCase],
+    body: CancelRequestSchema | None = None,
+    current_user: AuthenticatedUserSchema = Depends(require_role(UserRole.BUYER)),
+) -> OrderResponseSchema:
+    return await use_case(order_id, current_user, reason=body.reason if body else None)
