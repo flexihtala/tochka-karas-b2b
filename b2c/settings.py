@@ -19,6 +19,7 @@ class B2CSettings(BaseSettings):
     refresh_token_ttl_seconds: int = Field(default=2_592_000, alias='REFRESH_TOKEN_TTL_SECONDS')
 
     b2c_to_b2b_key: str = Field(default='dev-b2c-to-b2b-key-change-me', alias='B2C_TO_B2B_KEY')
+    b2b_to_b2c_key: str = Field(default='dev-b2b-to-b2c-key-change-me', alias='B2B_TO_B2C_KEY')
     b2b_url: str = Field(default='http://localhost:8001', alias='B2B_URL')
 
     @property
