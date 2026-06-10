@@ -27,8 +27,7 @@ from uuid import UUID, uuid4
 from apps.orders.enums import OrderStatus
 from apps.orders.errors import DeliverNotAllowedError, OrderNotFoundError
 from apps.orders.repositories import OrderItemRepository, OrderRepository
-from apps.orders.schemas.db import OrderUpdateSchema
-from apps.orders.schemas.response import OrderItemResponseSchema, OrderResponseSchema
+from apps.orders.schemas.db import OrderReadSchema, OrderUpdateSchema
 from apps.outbox.enums import OutboxEventType
 from apps.outbox.repositories import B2COutboxRepository
 from shared.outbox import OutboxEnqueueSchema
@@ -53,7 +52,7 @@ class MarkDeliveredUseCase:
         self.order_item_repository = order_item_repository
         self.outbox_repository = outbox_repository
 
-    async def __call__(self, order_id: UUID) -> OrderResponseSchema:
+    async def __call__(self, order_id: UUID) -> OrderReadSchema:
         order = await self.order_repository.get_or_none(order_id)
         if order is None:
             raise OrderNotFoundError()
@@ -63,7 +62,7 @@ class MarkDeliveredUseCase:
         # Идемпотентность: если уже DELIVERED — возвращаем текущее состояние,
         # outbox не трогаем (FULFILL уже либо отправлен, либо запланирован).
         if order.status == OrderStatus.DELIVERED.value:
-            return self._build_response(order, items)
+            return order
 
         # Переход допустим только из DELIVERING.
         if order.status != OrderStatus.DELIVERING.value:
@@ -86,31 +85,4 @@ class MarkDeliveredUseCase:
         updated = await self.order_repository.update(OrderUpdateSchema(id=order.id, status=OrderStatus.DELIVERED.value))
         assert updated is not None, 'Order disappeared between fetch and update'
 
-        return self._build_response(updated, items)
-
-    @staticmethod
-    def _build_response(order, items) -> OrderResponseSchema:  # type: ignore[no-untyped-def]
-        return OrderResponseSchema(
-            id=order.id,
-            user_id=order.user_id,
-            status=order.status,
-            items=[
-                OrderItemResponseSchema(
-                    id=it.id,
-                    sku_id=it.sku_id,
-                    product_id=it.product_id,
-                    product_title=it.product_title,
-                    sku_name=it.sku_name,
-                    quantity=it.quantity,
-                    unit_price=it.unit_price,
-                    line_total=it.line_total,
-                )
-                for it in items
-            ],
-            total_amount=order.total_amount,
-            delivery_address=order.delivery_address,
-            address_id=order.address_id,
-            payment_method_id=order.payment_method_id,
-            created_at=order.created_at,
-            updated_at=order.updated_at,
-        )
+        return updated

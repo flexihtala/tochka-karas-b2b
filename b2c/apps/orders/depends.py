@@ -17,9 +17,9 @@ class OrdersProvider(Provider):
     order_repository = provide(OrderRepository, scope=Scope.REQUEST)
     order_item_repository = provide(OrderItemRepository, scope=Scope.REQUEST)
     checkout_use_case = provide(CheckoutUseCase, scope=Scope.REQUEST)
+    cancel_order_use_case = provide(CancelOrderUseCase, scope=Scope.REQUEST)
     list_orders_use_case = provide(ListOrdersUseCase, scope=Scope.REQUEST)
     get_order_use_case = provide(GetOrderUseCase, scope=Scope.REQUEST)
-    cancel_order_use_case = provide(CancelOrderUseCase, scope=Scope.REQUEST)
     mark_delivered_use_case = provide(MarkDeliveredUseCase, scope=Scope.REQUEST)
 
     @provide(scope=Scope.APP)

@@ -17,13 +17,13 @@ from .db import (
     OrderUpdateSchema as OrderUpdateSchema,
 )
 from .request import (
-    CancelOrderRequestSchema as CancelOrderRequestSchema,
+    CancelRequestSchema as CancelRequestSchema,
 )
 from .request import (
-    CheckoutItemRequestSchema as CheckoutItemRequestSchema,
+    OrderCreateRequestSchema as OrderCreateRequestSchema,
 )
 from .request import (
-    CheckoutRequestSchema as CheckoutRequestSchema,
+    OrderItemSnapshotSchema as OrderItemSnapshotSchema,
 )
 from .response import (
     OrderItemResponseSchema as OrderItemResponseSchema,

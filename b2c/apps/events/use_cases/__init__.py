@@ -1,0 +1,1 @@
+from .handle_product_event import HandleProductEventUseCase as HandleProductEventUseCase

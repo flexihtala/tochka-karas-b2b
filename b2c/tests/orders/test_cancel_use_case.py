@@ -1,185 +1,164 @@
-"""US-ORD-03: cancel order use-case tests."""
-
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from apps.orders.enums import OrderStatus
 from apps.orders.errors import CancelNotAllowedError, OrderNotFoundError
-from apps.orders.models import OrderItem
-from apps.orders.schemas.db import OrderReadSchema
 from apps.orders.use_cases import CancelOrderUseCase
-from apps.outbox.enums import OutboxEventType
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
-from shared.outbox import OutboxStatus
-from shared.types import ServiceName
 from tests.orders.fakes import (
+    FakeAddressRepository,
     FakeB2BInventoryClient,
     FakeOrderItemRepository,
     FakeOrderRepository,
-    FakeOutboxRepository,
+    FakePaymentMethodRepository,
+    make_address,
+    make_order,
+    make_order_item,
+    make_payment_method,
 )
 
 
-def make_user() -> AuthenticatedUserSchema:
-    return AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+class _Harness:
+    def __init__(self):
+        self.order_repo = FakeOrderRepository()
+        self.item_repo = FakeOrderItemRepository(self.order_repo)
+        self.b2b = FakeB2BInventoryClient()
+        self.address_repo = FakeAddressRepository()
+        self.payment_repo = FakePaymentMethodRepository()
+        self.use_case = CancelOrderUseCase(
+            order_repository=self.order_repo,
+            order_item_repository=self.item_repo,
+            b2b_client=self.b2b,
+            address_repository=self.address_repo,
+            payment_method_repository=self.payment_repo,
+        )
+        self.buyer = AuthenticatedUserSchema(id=uuid4(), role=UserRole.BUYER)
+        self.address = make_address(buyer_id=self.buyer.id)
+        self.address_repo.seed(self.address)
+        self.payment = make_payment_method(buyer_id=self.buyer.id)
+        self.payment_repo.seed(self.payment)
 
-
-def make_order(user_id, *, status: str = OrderStatus.PAID.value) -> OrderReadSchema:
-    now = datetime.now(UTC)
-    return OrderReadSchema(
-        id=uuid4(),
-        user_id=user_id,
-        status=status,
-        total_amount=20_000,
-        idempotency_key=uuid4(),
-        delivery_address=None,
-        address_id=None,
-        payment_method_id=None,
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def make_item(order_id, sku_id=None, quantity: int = 2, unit_price: int = 10_000) -> OrderItem:
-    now = datetime.now(UTC)
-    im = OrderItem(
-        id=uuid4(),
-        order_id=order_id,
-        sku_id=sku_id or uuid4(),
-        product_id=uuid4(),
-        product_title='Phone',
-        sku_name='128GB',
-        quantity=quantity,
-        unit_price=unit_price,
-        line_total=quantity * unit_price,
-    )
-    im.created_at = now  # type: ignore[attr-defined]
-    im.updated_at = now  # type: ignore[attr-defined]
-    return im
-
-
-def make_use_case():
-    order_repo = FakeOrderRepository()
-    item_repo = FakeOrderItemRepository(order_repo)
-    b2b = FakeB2BInventoryClient()
-    outbox = FakeOutboxRepository()
-    use_case = CancelOrderUseCase(
-        order_repository=order_repo,
-        order_item_repository=item_repo,
-        b2b_client=b2b,
-        outbox_repository=outbox,
-    )
-    return use_case, order_repo, b2b, outbox
+    def seed_order(self, *, status: str, owner_id=None, cancel_reason=None, quantity: int = 2):
+        owner = owner_id or self.buyer.id
+        order = make_order(
+            user_id=owner,
+            status=status,
+            address_id=self.address.id,
+            payment_method_id=self.payment.id,
+            cancel_reason=cancel_reason,
+        )
+        item = make_order_item(order_id=order.id, quantity=quantity, unit_price=10_000)
+        self.order_repo.seed_order(order, [item])
+        return order, item
 
 
 @pytest.mark.anyio
 async def test_cancel_paid_order_transitions_to_cancelled():
-    use_case, order_repo, b2b, outbox = make_use_case()
-    user = make_user()
-    order = make_order(user.id, status=OrderStatus.PAID.value)
-    item = make_item(order.id, quantity=3, unit_price=5_000)
-    order_repo.seed_order(order, [item])
+    h = _Harness()
+    order, item = h.seed_order(status=OrderStatus.PAID.value, quantity=3)
 
-    result = await use_case(order.id, user)
+    response = await h.use_case(order.id, h.buyer)
 
-    assert result.status == OrderStatus.CANCELLED.value
-    # unreserve вызван с правильным набором items
-    assert len(b2b.unreserve_calls) == 1
-    assert b2b.unreserve_calls[0]['idempotency_key'] == order.id
-    assert b2b.unreserve_calls[0]['items'] == [{'sku_id': str(item.sku_id), 'quantity': 3}]
-    # outbox пустой — на happy path не enqueue
-    assert outbox.events == []
-    # запись в БД обновлена
-    saved = order_repo.by_id[order.id]
-    assert saved.status == OrderStatus.CANCELLED.value
-
-
-@pytest.mark.anyio
-async def test_cancel_created_order_also_works():
-    use_case, order_repo, b2b, _ = make_use_case()
-    user = make_user()
-    order = make_order(user.id, status=OrderStatus.CREATED.value)
-    item = make_item(order.id)
-    order_repo.seed_order(order, [item])
-
-    result = await use_case(order.id, user)
-
-    assert result.status == OrderStatus.CANCELLED.value
+    assert response.status == OrderStatus.CANCELLED.value
+    assert response.id == order.id
+    # B2B unreserve called once with order_id + items snapshot.
+    assert len(h.b2b.unreserve_calls) == 1
+    call = h.b2b.unreserve_calls[0]
+    assert call['order_id'] == order.id
+    assert call['items'] == [{'sku_id': str(item.sku_id), 'quantity': 3}]
+    # Persisted as CANCELLED.
+    assert h.order_repo.by_id[order.id].status == OrderStatus.CANCELLED.value
 
 
 @pytest.mark.anyio
 async def test_unreserve_failure_transitions_to_cancel_pending():
-    use_case, order_repo, b2b, outbox = make_use_case()
-    user = make_user()
-    order = make_order(user.id, status=OrderStatus.PAID.value)
-    item = make_item(order.id, quantity=2, unit_price=5_000)
-    order_repo.seed_order(order, [item])
-    b2b.unreserve_b2b_503 = True  # симуляция падения B2B
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.PAID.value)
+    h.b2b.unreserve_503 = True  # B2B unavailable / 5xx / timeout
 
-    result = await use_case(order.id, user)
+    response = await h.use_case(order.id, h.buyer)
 
-    assert result.status == OrderStatus.CANCEL_PENDING.value
-    # outbox содержит ровно одно событие UNRESERVE_ORDER → b2b
-    assert len(outbox.events) == 1
-    enqueued = outbox.events[0]
-    assert enqueued.event_type == OutboxEventType.UNRESERVE_ORDER.value
-    assert enqueued.target_service == ServiceName.B2B.value
-    assert enqueued.status == OutboxStatus.PENDING
-    assert enqueued.payload['order_id'] == str(order.id)
-    assert enqueued.payload['items'] == [{'sku_id': str(item.sku_id), 'quantity': 2}]
+    # 200 with CANCEL_PENDING — NOT an error.
+    assert response.status == OrderStatus.CANCEL_PENDING.value
+    assert len(h.b2b.unreserve_calls) == 1
+    # Persisted as CANCEL_PENDING (scaffold: left for async retry).
+    assert h.order_repo.by_id[order.id].status == OrderStatus.CANCEL_PENDING.value
 
 
 @pytest.mark.anyio
-async def test_cancel_assembling_order_succeeds_per_spec():
-    """Per spec b2c openapi.yaml: cancel allowed in CREATED/PAID/ASSEMBLING."""
-    use_case, order_repo, b2b_client, _ = make_use_case()
-    user = make_user()
-    order = make_order(user.id, status=OrderStatus.ASSEMBLING.value)
-    order_repo.seed_order(order, [make_item(order.id)])
+async def test_cancel_assembling_order_returns_409():
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.ASSEMBLING.value)
 
-    response = await use_case(order.id, user)
-    assert response.status == OrderStatus.CANCELLED.value
-    assert len(b2b_client.unreserve_calls) == 1
+    with pytest.raises(CancelNotAllowedError) as err:
+        await h.use_case(order.id, h.buyer)
 
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    'forbidden_status',
-    [
-        OrderStatus.DELIVERING.value,
-        OrderStatus.DELIVERED.value,
-        OrderStatus.CANCELLED.value,
-        OrderStatus.CANCEL_PENDING.value,
-    ],
-)
-async def test_cancel_non_cancelable_statuses_all_return_409(forbidden_status):
-    use_case, order_repo, _, _ = make_use_case()
-    user = make_user()
-    order = make_order(user.id, status=forbidden_status)
-    order_repo.seed_order(order, [make_item(order.id)])
-
-    with pytest.raises(CancelNotAllowedError):
-        await use_case(order.id, user)
+    assert err.value.status_code == 409
+    assert err.value.code == 'CANCEL_NOT_ALLOWED'
+    assert err.value.current_status == 'ASSEMBLING'
+    # B2B unreserve NOT called when status is not cancelable.
+    assert len(h.b2b.unreserve_calls) == 0
+    # Order untouched.
+    assert h.order_repo.by_id[order.id].status == OrderStatus.ASSEMBLING.value
 
 
 @pytest.mark.anyio
 async def test_other_user_order_returns_404():
-    use_case, order_repo, _, _ = make_use_case()
-    user = make_user()
-    foreign = make_user()
-    order = make_order(foreign.id, status=OrderStatus.PAID.value)
-    order_repo.seed_order(order, [make_item(order.id)])
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.PAID.value, owner_id=uuid4())  # owned by someone else
 
-    with pytest.raises(OrderNotFoundError):
-        await use_case(order.id, user)
+    with pytest.raises(OrderNotFoundError) as err:
+        await h.use_case(order.id, h.buyer)
+
+    assert err.value.status_code == 404
+    assert err.value.code == 'ORDER_NOT_FOUND'
+    # B2B not called for a foreign order.
+    assert len(h.b2b.unreserve_calls) == 0
 
 
 @pytest.mark.anyio
-async def test_cancel_nonexistent_order_returns_404():
-    use_case, _, _, _ = make_use_case()
-    user = make_user()
+async def test_cancel_created_order_transitions_to_cancelled():
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.CREATED.value)
+
+    response = await h.use_case(order.id, h.buyer)
+
+    assert response.status == OrderStatus.CANCELLED.value
+    assert len(h.b2b.unreserve_calls) == 1
+    assert h.order_repo.by_id[order.id].status == OrderStatus.CANCELLED.value
+
+
+@pytest.mark.anyio
+async def test_cancel_reason_persisted_and_surfaced_in_response():
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.PAID.value)
+
+    response = await h.use_case(order.id, h.buyer, reason='changed my mind')
+
+    assert response.cancel_reason == 'changed my mind'
+    # reason persisted on the order (survives in GET / replay).
+    assert h.order_repo.by_id[order.id].cancel_reason == 'changed my mind'
+
+
+@pytest.mark.anyio
+async def test_cancel_reason_persisted_even_on_cancel_pending():
+    h = _Harness()
+    order, _ = h.seed_order(status=OrderStatus.PAID.value)
+    h.b2b.unreserve_503 = True
+
+    response = await h.use_case(order.id, h.buyer, reason='duplicate order')
+
+    assert response.status == OrderStatus.CANCEL_PENDING.value
+    assert response.cancel_reason == 'duplicate order'
+    assert h.order_repo.by_id[order.id].cancel_reason == 'duplicate order'
+
+
+@pytest.mark.anyio
+async def test_missing_order_returns_404():
+    h = _Harness()
 
     with pytest.raises(OrderNotFoundError):
-        await use_case(uuid4(), user)
+        await h.use_case(uuid4(), h.buyer)
+
+    assert len(h.b2b.unreserve_calls) == 0

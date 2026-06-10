@@ -50,6 +50,43 @@ class B2BUnavailableError(OrderError):
         super().__init__('B2B_UNAVAILABLE', message, 503)
 
 
+class CartInvalidError(OrderError):
+    """422 — корзина невалидна для чекаута.
+
+    Spec (b2c openapi.yaml): POST /api/v1/orders 422 → CartValidationResponse.
+    Поднимается, когда корзина пуста, товар/SKU недоступен, active_quantity <
+    quantity, либо переданный items_snapshot расходится с актуальной корзиной.
+    `issues` проксируется в details (формат CartValidationIssue: {sku_id, type,
+    message, old_value?, new_value?}).
+    """
+
+    def __init__(
+        self,
+        issues: list[dict[str, Any]],
+        message: str = 'Корзина невалидна',
+    ):
+        super().__init__('CART_INVALID', message, 422, extra={'details': {'issues': issues}})
+        self.issues = issues
+
+
+class InvalidAddressError(OrderError):
+    """400 INVALID_ADDRESS — адрес не найден или принадлежит другому покупателю.
+
+    Чужой/несуществующий address_id трактуем одинаково (не раскрываем существование
+    чужих ресурсов), как и checkout-валидация в каноне.
+    """
+
+    def __init__(self, message: str = 'Адрес доставки не найден'):
+        super().__init__('INVALID_ADDRESS', message, 400)
+
+
+class InvalidPaymentMethodError(OrderError):
+    """400 INVALID_PAYMENT_METHOD — платёжный метод не найден или чужой."""
+
+    def __init__(self, message: str = 'Способ оплаты не найден'):
+        super().__init__('INVALID_PAYMENT_METHOD', message, 400)
+
+
 class CancelNotAllowedError(OrderError):
     """409 CANCEL_NOT_ALLOWED — заказ нельзя отменить из текущего статуса.
 

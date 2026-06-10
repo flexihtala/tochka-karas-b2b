@@ -11,7 +11,12 @@ from apps.orders.models import OrderItem
 from apps.orders.schemas.db import OrderReadSchema
 from apps.orders.use_cases import GetOrderUseCase, ListOrdersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
-from tests.orders.fakes import FakeOrderItemRepository, FakeOrderRepository
+from tests.orders.fakes import (
+    FakeAddressRepository,
+    FakeOrderItemRepository,
+    FakeOrderRepository,
+    FakePaymentMethodRepository,
+)
 
 
 def make_user() -> AuthenticatedUserSchema:
@@ -35,6 +40,8 @@ def make_order(
         delivery_address=None,
         address_id=None,
         payment_method_id=None,
+        comment=None,
+        cancel_reason=None,
         created_at=now,
         updated_at=now,
     )
@@ -125,14 +132,15 @@ async def test_order_detail_shows_fixed_prices():
     use_case = GetOrderUseCase(
         order_repository=repo,
         order_item_repository=FakeOrderItemRepository(repo),
+        address_repository=FakeAddressRepository(),
+        payment_method_repository=FakePaymentMethodRepository(),
     )
     result = await use_case(order.id, user)
 
     assert result.id == order.id
     assert len(result.items) == 1
-    # фиксированные поля проброшены без обращения к B2B
-    assert result.items[0].product_title == item.product_title
-    assert result.items[0].sku_name == item.sku_name
+    # фиксированные поля проброшены без обращения к B2B (снапшот, не текущий B2B)
+    assert result.items[0].name == f'{item.product_title} {item.sku_name}'.strip()
     assert result.items[0].unit_price == item.unit_price
     assert result.items[0].line_total == item.line_total
 
@@ -149,6 +157,8 @@ async def test_other_user_order_returns_404_not_403():
     use_case = GetOrderUseCase(
         order_repository=repo,
         order_item_repository=FakeOrderItemRepository(repo),
+        address_repository=FakeAddressRepository(),
+        payment_method_repository=FakePaymentMethodRepository(),
     )
     with pytest.raises(OrderNotFoundError):
         await use_case(foreign_order.id, user)
@@ -162,6 +172,8 @@ async def test_get_order_not_found_for_nonexistent_id():
     use_case = GetOrderUseCase(
         order_repository=repo,
         order_item_repository=FakeOrderItemRepository(repo),
+        address_repository=FakeAddressRepository(),
+        payment_method_repository=FakePaymentMethodRepository(),
     )
     with pytest.raises(OrderNotFoundError):
         await use_case(uuid4(), user)
