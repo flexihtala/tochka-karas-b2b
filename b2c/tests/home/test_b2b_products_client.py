@@ -53,26 +53,28 @@ async def test_fetch_batch_calls_b2b_with_ids_and_returns_products():
         captured['url'] = str(request.url)
         captured['headers'] = dict(request.headers)
         captured['body'] = request.content.decode()
+        # Контракт b2b/apps/public: bare list ProductPublicResponseSchema
+        # (поля min_price/cover_image; b2c маппит их в price/image_url).
         return Response(
             200,
-            json={
-                'items': [
-                    {
-                        'id': str(pid_a),
-                        'title': 'Apple',
-                        'slug': 'apple',
-                        'price': 99.5,
-                        'image_url': 'https://cdn.b2b/apple.png',
-                    },
-                    {
-                        'id': str(pid_b),
-                        'title': 'Banana',
-                        'slug': 'banana',
-                        'price': None,
-                        'image_url': None,
-                    },
-                ]
-            },
+            json=[
+                {
+                    'id': str(pid_a),
+                    'title': 'Apple',
+                    'slug': 'apple',
+                    'status': 'MODERATED',
+                    'min_price': 9950,
+                    'cover_image': 'https://cdn.b2b/apple.png',
+                },
+                {
+                    'id': str(pid_b),
+                    'title': 'Banana',
+                    'slug': 'banana',
+                    'status': 'MODERATED',
+                    'min_price': None,
+                    'cover_image': None,
+                },
+            ],
         )
 
     client = B2BProductsClient(service_client=_patched_client(handler))
@@ -81,9 +83,12 @@ async def test_fetch_batch_calls_b2b_with_ids_and_returns_products():
     assert isinstance(result[0], B2BProductSchema)
     assert {p.id for p in result} == {pid_a, pid_b}
     assert result[0].slug == 'apple'
+    assert result[0].price == 9950
+    assert result[0].image_url == 'https://cdn.b2b/apple.png'
     assert captured['method'] == 'POST'
-    assert captured['url'].endswith('/api/v1/products/batch')
+    assert captured['url'].endswith('/api/v1/public/products/batch')
     assert captured['headers']['x-service-key'] == 'dev-b2c-to-b2b-key-change-me'
+    assert '"product_ids"' in captured['body']
     assert str(pid_a) in captured['body']
     assert str(pid_b) in captured['body']
 

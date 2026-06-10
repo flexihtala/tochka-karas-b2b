@@ -1,15 +1,17 @@
 """B2BProductsClient — batch-обогащение товаров для подборок b2c.
 
 Дизайн:
-- POST /api/v1/products/batch с {"ids": [...]} → {"items": [...]}.
+- POST /api/v1/public/products/batch с {"product_ids": [...]} → bare list карточек
+  (контракт b2b/apps/public: BatchProductsRequestSchema → list[ProductPublicResponseSchema]).
 - b2b возвращает ТОЛЬКО доступные продукты (статус MODERATED, не deleted, не BLOCKED).
   Те id, что не вернулись, b2c считает unavailable.
+- Поля карточки маппятся: price ← min_price, image_url ← cover_image.
 - Под капотом — `shared.http_clients.ServiceClient`, с X-Service-Key.
 """
 
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, TypeAdapter
 
 from shared.http_clients import ServiceClient
 
@@ -17,19 +19,20 @@ from shared.http_clients import ServiceClient
 class B2BProductSchema(BaseModel):
     """Минимальная карточка товара, нужная homepage-подборкам."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: UUID
     title: str
     slug: str
-    price: float | None = None
-    image_url: str | None = None
+    price: int | None = Field(default=None, validation_alias=AliasChoices('price', 'min_price'))
+    image_url: str | None = Field(default=None, validation_alias=AliasChoices('image_url', 'cover_image'))
 
 
-class B2BProductsBatchResponseSchema(BaseModel):
-    items: list[B2BProductSchema]
+_batch_list_adapter = TypeAdapter(list[B2BProductSchema])
 
 
 class B2BProductsClient:
-    """Тонкий доменный обёртка над ServiceClient для запроса карточек товаров."""
+    """Тонкая доменная обёртка над ServiceClient для запроса карточек товаров."""
 
     def __init__(self, service_client: ServiceClient):
         self.service_client = service_client
@@ -43,7 +46,6 @@ class B2BProductsClient:
         if not product_ids:
             return []
 
-        payload = {'ids': [str(pid) for pid in product_ids]}
-        response = await self.service_client.post('/api/v1/products/batch', json=payload)
-        parsed = B2BProductsBatchResponseSchema.model_validate(response)
-        return parsed.items
+        payload = {'product_ids': [str(pid) for pid in product_ids]}
+        response = await self.service_client.post('/api/v1/public/products/batch', json=payload)
+        return _batch_list_adapter.validate_python(response)

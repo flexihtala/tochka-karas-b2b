@@ -37,7 +37,7 @@ def make_banner(
 
 @pytest.mark.anyio
 async def test_active_banners_returned_sorted_by_priority():
-    """Активные баннеры (с учётом расписания) отдаются в priority DESC."""
+    """Активные баннеры (с учётом расписания) отдаются в priority ASC (меньше — выше)."""
     now = datetime.now(UTC)
     repo = FakeBannerRepository()
 
@@ -67,8 +67,9 @@ async def test_active_banners_returned_sorted_by_priority():
     use_case = ListBannersUseCase(banner_repository=repo)
     result = await use_case()
 
-    # Только активные и попадающие в расписание; сортировка DESC по priority.
-    assert [r.title for r in result] == ['High', 'Scheduled', 'Mid', 'Low']
+    # Только активные и попадающие в расписание; сортировка ASC по priority.
+    assert [r.title for r in result.items] == ['Low', 'Mid', 'Scheduled', 'High']
+    assert result.total_count == 4
 
 
 @pytest.mark.anyio
@@ -86,7 +87,8 @@ async def test_no_active_banners_returns_200_empty():
     use_case = ListBannersUseCase(banner_repository=repo)
     result = await use_case()
 
-    assert result == []
+    assert result.items == []
+    assert result.total_count == 0
 
 
 @pytest.mark.anyio

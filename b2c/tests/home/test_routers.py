@@ -12,7 +12,7 @@ from apps.errors import setup_error_handlers
 from apps.home.errors import BannerNotFoundError
 from apps.home.routers import router as home_router
 from apps.home.schemas.request import BannerClickRequestSchema
-from apps.home.schemas.response import BannerResponseSchema
+from apps.home.schemas.response import BannerListResponseSchema, BannerResponseSchema
 from apps.home.use_cases import ClickBannerUseCase, ListBannersUseCase
 from shared.auth_lib import AuthenticatedUserSchema, UserRole
 
@@ -39,9 +39,9 @@ def _make_banner(banner_id: UUID | None = None, priority: int = 0) -> BannerResp
 class StubListBanners:
     def __init__(self):
         self.calls = 0
-        self.response: list[BannerResponseSchema] = []
+        self.response: BannerListResponseSchema = BannerListResponseSchema(items=[], total_count=0)
 
-    async def __call__(self) -> list[BannerResponseSchema]:
+    async def __call__(self) -> BannerListResponseSchema:
         self.calls += 1
         return self.response
 
@@ -102,29 +102,34 @@ def stubs():
 
 def test_list_home_banners_returns_200_empty_when_no_banners(stubs):
     list_stub, click_stub = stubs
-    list_stub.response = []
+    list_stub.response = BannerListResponseSchema(items=[], total_count=0)
     client = TestClient(_make_app(list_stub, click_stub, user=None))
 
-    response = client.get('/api/v1/catalog/banners')
+    response = client.get('/api/v1/home/banners')
 
     assert response.status_code == 200
-    assert response.json() == []
+    assert response.json() == {'items': [], 'total_count': 0}
     assert list_stub.calls == 1
 
 
 def test_list_home_banners_returns_list_without_auth(stubs):
     list_stub, click_stub = stubs
-    list_stub.response = [_make_banner(priority=5), _make_banner(priority=1)]
+    list_stub.response = BannerListResponseSchema(
+        items=[_make_banner(priority=1), _make_banner(priority=5)],
+        total_count=2,
+    )
     client = TestClient(_make_app(list_stub, click_stub, user=None))
 
-    response = client.get('/api/v1/catalog/banners')
+    response = client.get('/api/v1/home/banners')
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 2
-    # Spec field names: link, ordering, active_from, active_to
-    assert body[0]['ordering'] == 5
-    assert body[0]['link'] == 'https://example.com/landing'
+    assert body['total_count'] == 2
+    assert len(body['items']) == 2
+    # Канон-форма карточки баннера: id/title/image_url/link/priority.
+    assert body['items'][0]['priority'] == 1
+    assert body['items'][0]['link'] == 'https://example.com/landing'
+    assert 'ordering' not in body['items'][0]
 
 
 def test_post_banner_event_returns_204_anonymous(stubs):
@@ -162,7 +167,7 @@ def test_post_banner_event_unknown_banner_returns_400(stubs):
     response = client.post('/api/v1/banner-events', json={'banner_id': str(uuid4())})
 
     assert response.status_code == 400
-    assert response.json() == {'code': 'NOT_FOUND', 'message': 'Баннер не найден'}
+    assert response.json() == {'code': 'BANNER_NOT_FOUND', 'message': 'Баннер не найден'}
 
 
 def test_post_banner_event_invalid_payload_returns_400(stubs):

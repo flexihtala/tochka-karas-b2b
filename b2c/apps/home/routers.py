@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.home.schemas import (
     BannerClickRequestSchema,
-    BannerResponseSchema,
+    BannerListResponseSchema,
     CollectionMetaResponseSchema,
     CollectionProductsResponseSchema,
 )
@@ -29,13 +29,13 @@ error_responses = {
 
 
 @router.get(
-    '/catalog/banners',
-    response_model=list[BannerResponseSchema],
+    '/home/banners',
+    response_model=BannerListResponseSchema,
     responses=error_responses,
 )
 @inject
-async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> list[BannerResponseSchema]:
-    """GET /api/v1/catalog/banners — active banners per openapi spec."""
+async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> BannerListResponseSchema:
+    """GET /api/v1/home/banners — публичный список активных баннеров (канон B2C-14)."""
     return await use_case()
 
 
@@ -64,7 +64,20 @@ async def post_banner_event(
 async def list_home_collections(
     use_case: FromDishka[ListCollectionsUseCase],
 ) -> list[CollectionMetaResponseSchema]:
-    """GET /api/v1/catalog/collections — collections list per openapi spec."""
+    """GET /api/v1/catalog/collections — список подборок без товаров (spec-путь)."""
+    return await use_case()
+
+
+@router.get(
+    '/home/collections',
+    response_model=list[CollectionMetaResponseSchema],
+    responses=error_responses,
+)
+@inject
+async def list_home_collections_alias(
+    use_case: FromDishka[ListCollectionsUseCase],
+) -> list[CollectionMetaResponseSchema]:
+    """GET /api/v1/home/collections — alias канонного пути (B2C-15)."""
     return await use_case()
 
 
@@ -78,9 +91,24 @@ async def get_home_collection_products(
     collection_id: UUID,
     use_case: FromDishka[GetCollectionProductsUseCase],
 ) -> CollectionProductsResponseSchema:
-    """GET /api/v1/catalog/collections/{id}/products — project extension.
+    """GET /api/v1/catalog/collections/{id}/products — товары подборки.
 
-    Spec embeds products inside Collection; this split endpoint keeps the
-    response size bounded and decouples meta-listing from B2B enrichment.
+    Spec встраивает products внутрь Collection; раздельный endpoint ограничивает
+    размер ответа и отделяет листинг метаданных от B2B-обогащения (канон B2C-15:
+    items в исходном порядке + unavailable_ids).
     """
+    return await use_case(collection_id)
+
+
+@router.get(
+    '/home/collections/{collection_id}/products',
+    response_model=CollectionProductsResponseSchema,
+    responses=error_responses,
+)
+@inject
+async def get_home_collection_products_alias(
+    collection_id: UUID,
+    use_case: FromDishka[GetCollectionProductsUseCase],
+) -> CollectionProductsResponseSchema:
+    """GET /api/v1/home/collections/{id}/products — alias канонного пути (B2C-15)."""
     return await use_case(collection_id)
