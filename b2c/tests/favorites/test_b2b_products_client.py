@@ -5,44 +5,14 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from apps.favorites.errors import B2BUnavailableError
 from apps.favorites.use_cases import B2BProductsClient
-from shared.http_clients import ServiceClient
+from shared.http_clients import ServiceClient, ServiceClientError
 
 
-def _make_client(handler):
+def _make_client(handler) -> B2BProductsClient:
     transport = httpx.MockTransport(handler)
-    service_client = ServiceClient(base_url='http://b2b-test', service_key='test-key')
-
-    # Подменяем httpx.AsyncClient внутри ServiceClient через monkey-patched factory.
-    # Простейший способ — заинжектить transport через подмену метода _request,
-    # но проще обернуть send в новом ServiceClient через подкласс.
-    class _ServiceClientWithTransport(ServiceClient):
-        async def _request(self_inner, method, path, *, json=None, params=None, idempotency_key=None):
-            url = f'{self_inner.base_url}{path}'
-            headers = {'X-Service-Key': self_inner.service_key}
-            if idempotency_key:
-                headers['Idempotency-Key'] = idempotency_key
-            async with httpx.AsyncClient(transport=transport, timeout=self_inner.timeout) as client:
-                response = await client.request(method, url, json=json, params=params, headers=headers)
-            if response.status_code >= 400:
-                try:
-                    payload = response.json()
-                except ValueError:
-                    payload = response.text
-                from shared.http_clients import ServiceClientError
-
-                raise ServiceClientError(
-                    status_code=response.status_code,
-                    message=f'{method} {path} failed',
-                    payload=payload,
-                )
-            if not response.content:
-                return {}
-            return response.json()
-
-    transport_client = _ServiceClientWithTransport(base_url='http://b2b-test', service_key='test-key')
-    return B2BProductsClient(service_client=transport_client), service_client
+    service_client = ServiceClient(base_url='http://b2b-test', service_key='test-key', transport=transport)
+    return B2BProductsClient(service_client=service_client)
 
 
 @pytest.mark.anyio
@@ -66,7 +36,7 @@ async def test_b2b_products_client_returns_items_from_b2b():
             },
         )
 
-    client, _ = _make_client(handler)
+    client = _make_client(handler)
     result = await client.list_products_by_ids([pid_a, pid_b])
 
     assert {p['id'] for p in result} == {str(pid_a), str(pid_b)}
@@ -77,18 +47,22 @@ async def test_b2b_products_client_returns_empty_for_empty_ids():
     def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - не вызывается
         raise AssertionError('B2B не должен вызываться при пустом списке ids')
 
-    client, _ = _make_client(handler)
+    client = _make_client(handler)
     assert await client.list_products_by_ids([]) == []
 
 
 @pytest.mark.anyio
-async def test_b2b_products_client_raises_b2b_unavailable_on_5xx():
+async def test_b2b_products_client_raises_service_client_error_on_5xx():
+    """Транспортная ошибка пробрасывается как есть — интерпретацию
+    (503 на PUT vs деградация GET-списка) делают use-case'ы.
+    """
+
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={'error': {'code': 'SERVICE_UNAVAILABLE', 'message': 'down'}})
 
-    client, _ = _make_client(handler)
+    client = _make_client(handler)
 
-    with pytest.raises(B2BUnavailableError):
+    with pytest.raises(ServiceClientError):
         await client.list_products_by_ids([uuid4()])
 
 
@@ -99,5 +73,5 @@ async def test_b2b_products_client_excludes_non_dict_items_defensively():
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={'items': 'broken'})
 
-    client, _ = _make_client(handler)
+    client = _make_client(handler)
     assert await client.list_products_by_ids([uuid4()]) == []
