@@ -150,7 +150,7 @@ def test_get_collection_products_unknown_returns_404(stubs):
     response = client.get(f'/api/v1/catalog/collections/{uuid4()}/products')
 
     assert response.status_code == 404
-    assert response.json() == {'code': 'NOT_FOUND', 'message': 'Подборка не найдена'}
+    assert response.json() == {'code': 'COLLECTION_NOT_FOUND', 'message': 'Подборка не найдена'}
 
 
 def test_get_collection_products_empty_collection_returns_empty_lists(stubs):
