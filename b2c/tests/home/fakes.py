@@ -50,8 +50,8 @@ class FakeBannerRepository:
             and (banner.schedule_start is None or banner.schedule_start <= now)
             and (banner.schedule_end is None or banner.schedule_end >= now)
         ]
-        # priority DESC, created_at ASC — стабильная очерёдность при равном priority.
-        return sorted(result, key=lambda b: (-b.priority, b.created_at))
+        # priority ASC (меньше — выше), created_at ASC — стабильная очерёдность при равном priority.
+        return sorted(result, key=lambda b: (b.priority, b.created_at))
 
 
 class FakeBannerClickRepository:

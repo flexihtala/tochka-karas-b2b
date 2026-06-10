@@ -14,7 +14,7 @@ class BannerRepository(DBCrudRepository[Banner, BannerCreateSchema, BannerReadSc
 
         is_active=true И (schedule_start IS NULL ИЛИ schedule_start <= now)
                        И (schedule_end   IS NULL ИЛИ schedule_end   >= now)
-        Сортировка: priority DESC.
+        Сортировка: priority ASC (меньшее значение — выше в слайдере, канон B2C-14).
         """
         query = (
             select(Banner)
@@ -25,7 +25,7 @@ class BannerRepository(DBCrudRepository[Banner, BannerCreateSchema, BannerReadSc
                     or_(Banner.schedule_end.is_(None), Banner.schedule_end >= now),
                 )
             )
-            .order_by(Banner.priority.desc(), Banner.created_at.asc())
+            .order_by(Banner.priority.asc(), Banner.created_at.asc())
         )
 
         async with self.session_manager.get_session() as session:
