@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response, status
 from apps.auth.schemas import ErrorResponseSchema
 from apps.home.schemas import (
     BannerClickRequestSchema,
-    BannerListResponseSchema,
+    BannerResponseSchema,
     CollectionMetaResponseSchema,
     CollectionProductsResponseSchema,
 )
@@ -29,13 +29,16 @@ error_responses = {
 
 
 @router.get(
-    '/home/banners',
-    response_model=BannerListResponseSchema,
+    '/catalog/banners',
+    response_model=list[BannerResponseSchema],
     responses=error_responses,
 )
 @inject
-async def list_home_banners(use_case: FromDishka[ListBannersUseCase]) -> BannerListResponseSchema:
-    """GET /api/v1/home/banners — публичный список активных баннеров (канон B2C-14)."""
+async def list_catalog_banners(use_case: FromDishka[ListBannersUseCase]) -> list[BannerResponseSchema]:
+    """GET /api/v1/catalog/banners — публичный список активных баннеров (unified B2C spec).
+
+    Единственный канонический адрес по спеке; ответ — плоский массив Banner[].
+    """
     return await use_case()
 
 

@@ -11,7 +11,6 @@ from .db import CollectionItemUpdateSchema as CollectionItemUpdateSchema
 from .db import CollectionReadSchema as CollectionReadSchema
 from .db import CollectionUpdateSchema as CollectionUpdateSchema
 from .request import BannerClickRequestSchema as BannerClickRequestSchema
-from .response import BannerListResponseSchema as BannerListResponseSchema
 from .response import BannerResponseSchema as BannerResponseSchema
 from .response import CollectionMetaResponseSchema as CollectionMetaResponseSchema
 from .response import CollectionProductItemSchema as CollectionProductItemSchema

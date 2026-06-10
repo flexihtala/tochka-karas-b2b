@@ -67,9 +67,9 @@ async def test_active_banners_returned_sorted_by_priority():
     use_case = ListBannersUseCase(banner_repository=repo)
     result = await use_case()
 
-    # Только активные и попадающие в расписание; сортировка ASC по priority.
-    assert [r.title for r in result.items] == ['Low', 'Mid', 'Scheduled', 'High']
-    assert result.total_count == 4
+    # Только активные и попадающие в расписание; сортировка ASC по priority (wire-поле — ordering).
+    assert [r.title for r in result] == ['Low', 'Mid', 'Scheduled', 'High']
+    assert [r.ordering for r in result] == [1, 5, 7, 10]
 
 
 @pytest.mark.anyio
@@ -87,8 +87,7 @@ async def test_no_active_banners_returns_200_empty():
     use_case = ListBannersUseCase(banner_repository=repo)
     result = await use_case()
 
-    assert result.items == []
-    assert result.total_count == 0
+    assert result == []
 
 
 @pytest.mark.anyio
