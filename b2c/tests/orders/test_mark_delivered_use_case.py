@@ -46,6 +46,8 @@ def make_order(*, status: str = OrderStatus.DELIVERING.value, user_id: UUID | No
         delivery_address=None,
         address_id=None,
         payment_method_id=None,
+        comment=None,
+        cancel_reason=None,
         created_at=now,
         updated_at=now,
     )
