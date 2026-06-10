@@ -50,7 +50,7 @@ async def test_subscribe_use_case_uses_jwt_user_id():
 
 
 @pytest.mark.anyio
-async def test_subscribe_use_case_returns_201_with_notify_on():
+async def test_subscribe_use_case_returns_subscription_with_notify_on():
     user = make_user()
     repo = FakeSubscriptionRepository()
     use_case = SubscribeUseCase(subscription_repository=repo)
