@@ -13,6 +13,7 @@ from apps.favorites import models as favorites_models
 from apps.home import models as home_models
 from apps.inbox import models as inbox_models
 from apps.orders import models as orders_models
+from apps.outbox import models as outbox_models
 from apps.payment_methods import models as payment_methods_models
 from apps.subscriptions import models as subscriptions_models
 from shared.db import Base
@@ -38,6 +39,7 @@ subscriptions_models
 home_models
 inbox_models
 events_models
+outbox_models
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

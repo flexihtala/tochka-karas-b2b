@@ -1,0 +1,1 @@
+from .outbox_repository import B2COutboxRepository as B2COutboxRepository

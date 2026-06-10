@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from apps.addresses.schemas.db import AddressReadSchema
 from apps.cart.schemas.db import CartItemReadSchema, CartReadSchema
 from apps.orders.b2b_client import B2BInventoryClient
+from shared.outbox import OutboxEnqueueSchema, OutboxEventReadSchema, OutboxStatus
 from apps.orders.errors import B2BUnavailableError, ReserveFailedError
 from apps.orders.models import OrderItem
 from apps.orders.schemas.db import (
@@ -37,6 +38,10 @@ class FakeOrderRepository:
         if order_id is None:
             return None
         return self.by_id.get(order_id)
+
+    async def get_or_none(self, id_: UUID) -> OrderReadSchema | None:
+        """Мирроринг DBCrudRepository.get_or_none (используется mark_delivered)."""
+        return self.by_id.get(id_)
 
     async def get_for_user(self, order_id: UUID, user_id: UUID) -> OrderReadSchema | None:
         order = self.by_id.get(order_id)
@@ -389,3 +394,36 @@ def make_payment_method(*, buyer_id: UUID, payment_method_id: UUID | None = None
         created_at=now,
         updated_at=now,
     )
+
+
+class FakeOutboxRepository:
+    """In-memory заместитель B2COutboxRepository для unit-тестов use-cases.
+
+    Хранит вставленные события в self.events; commit-семантика отсутствует —
+    предполагается, что use-case в тестах не оперирует session напрямую и
+    использует enqueue_in_new_transaction().
+    """
+
+    def __init__(self) -> None:
+        self.events: list[OutboxEventReadSchema] = []
+        self.enqueue_calls: list[OutboxEnqueueSchema] = []
+
+    async def enqueue_in_new_transaction(self, data: OutboxEnqueueSchema) -> OutboxEventReadSchema:
+        self.enqueue_calls.append(data)
+        now = datetime.now(UTC)
+        event = OutboxEventReadSchema(
+            id=uuid4(),
+            idempotency_key=data.idempotency_key,
+            event_type=data.event_type,
+            target_service=data.target_service.value,
+            payload=data.payload,
+            status=OutboxStatus.PENDING,
+            retry_count=0,
+            next_retry_at=None,
+            sent_at=None,
+            last_error=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self.events.append(event)
+        return event

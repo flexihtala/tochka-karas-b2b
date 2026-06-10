@@ -11,6 +11,7 @@ from apps.favorites.depends import FavoritesProvider
 from apps.home.depends import HomeProvider
 from apps.inbox.depends import InboxProvider
 from apps.orders.depends import OrdersProvider
+from apps.outbox.depends import OutboxProvider
 from apps.payment_methods.depends import PaymentMethodsProvider
 from apps.subscriptions.depends import SubscriptionsProvider
 from shared.db import SessionManager
@@ -40,6 +41,7 @@ providers = [
     FavoritesProvider(),
     SubscriptionsProvider(),
     HomeProvider(),
+    OutboxProvider(),
     InboxProvider(),
     EventsProvider(),
 ]
